@@ -20,12 +20,9 @@ plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
     alias(libs.plugins.kotlin.compose)
+    alias(libs.plugins.ksp)
     id("org.jetbrains.kotlin.plugin.serialization")
     id("com.google.gms.google-services")
-    kotlin("kapt")
-}
-kapt {
-    correctErrorTypes = true
 }
 android {
     namespace = "com.example.maps123"
@@ -126,7 +123,7 @@ dependencies {
     val roomVersion = "2.8.4"
     implementation("androidx.room:room-runtime:$roomVersion")
     implementation("androidx.room:room-ktx:$roomVersion")
-    kapt("androidx.room:room-compiler:$roomVersion")
+    ksp("androidx.room:room-compiler:$roomVersion")
 
     // Maps
     implementation("com.google.android.gms:play-services-maps:19.0.0")
