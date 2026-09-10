@@ -1,12 +1,36 @@
 import org.jetbrains.kotlin.gradle.plugin.mpp.apple.XCFramework
+import java.util.Properties
+
+val localProperties = Properties().apply {
+    val file = rootProject.file("local.properties")
+    if (file.exists()) file.inputStream().use(::load)
+}
+
+fun publicProperty(name: String): String =
+    localProperties.getProperty(name)
+        ?: providers.environmentVariable(name).orNull
+        ?: ""
+
+fun asBuildConfigString(value: String): String =
+    "\"${value.replace("\\", "\\\\").replace("\"", "\\\"")}\""
 
 plugins {
     alias(libs.plugins.kotlin.multiplatform)
     alias(libs.plugins.android.kotlin.multiplatform.library)
     alias(libs.plugins.android.lint)
-    // Ensure the Compose Compiler plugin is applied
     id("org.jetbrains.kotlin.plugin.compose") version "2.2.21"
+    id("org.jetbrains.kotlin.plugin.serialization") version "2.2.21"
     id("org.jetbrains.kotlin.native.cocoapods")
+}
+
+android {
+    buildFeatures {
+        buildConfig = true
+    }
+    defaultConfig {
+        buildConfigField("String", "SUPABASE_URL", asBuildConfigString(publicProperty("SUPABASE_URL")))
+        buildConfigField("String", "SUPABASE_PUBLISHABLE_KEY", asBuildConfigString(publicProperty("SUPABASE_PUBLISHABLE_KEY")))
+    }
 }
 
 kotlin {
@@ -29,7 +53,6 @@ kotlin {
         version = "1.0"
         summary = "Shared KMP module for maps123"
         homepage = "https://example.com/maps123"
-        // Keep this in sync with iosApp/Podfile.
         ios.deploymentTarget = "15.0"
         podfile = project.file("../iosApp/Podfile")
         framework {
@@ -37,8 +60,6 @@ kotlin {
             isStatic = true
         }
         pod("GoogleMaps")
-        pod("FirebaseCore")
-        pod("FirebaseFirestore")
     }
 
     iosX64 {
@@ -58,13 +79,8 @@ kotlin {
             baseName = xcfName
             xcframework.add(this)
         }
-        // Fix for C-interop module map errors with Xcode 16.4+
         binaries.all {
-            linkerOpts += listOf(
-                "-fmodules",
-                "-fcxx-modules",
-                "-suppress-warnings"
-            )
+            linkerOpts += listOf("-fmodules", "-fcxx-modules", "-suppress-warnings")
         }
     }
 
@@ -72,15 +88,18 @@ kotlin {
         commonMain {
             dependencies {
                 implementation(libs.kotlin.stdlib)
-
-                // Explicit JetBrains Compose dependencies
                 implementation("org.jetbrains.compose.runtime:runtime:1.7.1")
                 implementation("org.jetbrains.compose.foundation:foundation:1.7.1")
                 implementation("org.jetbrains.compose.material3:material3:1.7.1")
                 implementation("org.jetbrains.compose.ui:ui:1.7.1")
                 implementation("org.jetbrains.compose.material:material-icons-extended:1.7.1")
-
                 implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.8.1")
+
+                implementation(platform("io.github.jan-tennert.supabase:bom:3.5.0"))
+                implementation("io.github.jan-tennert.supabase:postgrest-kt")
+                implementation("io.github.jan-tennert.supabase:realtime-kt")
+                implementation("io.ktor:ktor-client-core:3.0.3")
+                implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.8.1")
             }
         }
 
@@ -92,14 +111,15 @@ kotlin {
 
         androidMain {
             dependencies {
-                // Necessary for Composable functions to be recognized on Android
                 implementation("androidx.compose.runtime:runtime:1.7.1")
                 implementation("androidx.compose.ui:ui-tooling-preview:1.7.1")
+                implementation("io.ktor:ktor-client-android:3.0.3")
+            }
+        }
 
-                // Firebase for Android
-                implementation(project.dependencies.platform("com.google.firebase:firebase-bom:33.7.0"))
-                implementation("com.google.firebase:firebase-firestore")
-                implementation("org.jetbrains.kotlinx:kotlinx-coroutines-play-services:1.7.3")
+        iosMain {
+            dependencies {
+                implementation("io.ktor:ktor-client-darwin:3.0.3")
             }
         }
     }
