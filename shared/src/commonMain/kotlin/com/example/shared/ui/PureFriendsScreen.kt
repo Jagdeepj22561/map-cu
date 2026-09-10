@@ -26,6 +26,7 @@ fun PureFriendsScreen() {
     var loading by remember { mutableStateOf(true) }
     var error by remember { mutableStateOf<String?>(null) }
     var sentIds by remember { mutableStateOf<Set<String>>(emptySet()) }
+    var sendingIds by remember { mutableStateOf<Set<String>>(emptySet()) }
     val scope = rememberCoroutineScope()
 
     fun refresh() = scope.launch {
@@ -82,6 +83,9 @@ fun PureFriendsScreen() {
                 verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
                 items(people, key = { it.userId }) { person ->
+                    val isSent = person.userId in sentIds
+                    val isSending = person.userId in sendingIds
+
                     ElevatedCard(Modifier.fillMaxWidth(), shape = MaterialTheme.shapes.medium) {
                         Row(Modifier.fillMaxWidth().padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
                             Surface(Modifier.size(48.dp).clip(CircleShape), color = MaterialTheme.colorScheme.secondaryContainer) {
@@ -97,20 +101,30 @@ fun PureFriendsScreen() {
                                     Text(person.reasons.joinToString("  •  "), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
                                 }
                             }
-                            if (person.userId in sentIds) {
-                                AssistChip(
+                            when {
+                                isSent -> AssistChip(
                                     onClick = {},
                                     label = { Text("Request Sent") }
                                 )
-                            } else {
-                                FilledTonalButton(onClick = {
-                                    scope.launch {
-                                        runCatching {
-                                            repository.sendFriendRequest(person.userId)
-                                            sentIds = sentIds + person.userId
-                                        }.onFailure { error = it.message ?: "Unable to send request." }
-                                    }
-                                }) {
+                                isSending -> FilledTonalButton(
+                                    onClick = {},
+                                    enabled = false
+                                ) { Text("Sending…") }
+                                else -> FilledTonalButton(
+                                    onClick = {
+                                        sendingIds = sendingIds + person.userId
+                                        scope.launch {
+                                            runCatching {
+                                                repository.sendFriendRequest(person.userId)
+                                                sentIds = sentIds + person.userId
+                                            }.onFailure {
+                                                error = it.message ?: "Unable to send request."
+                                            }
+                                            sendingIds = sendingIds - person.userId
+                                        }
+                                    },
+                                    enabled = person.userId !in sendingIds
+                                ) {
                                     Icon(Icons.Default.PersonAdd, null, Modifier.size(18.dp))
                                     Spacer(Modifier.width(5.dp))
                                     Text("Add")
