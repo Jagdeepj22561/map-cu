@@ -1,3 +1,4 @@
+import com.codingfeline.buildkonfig.compiler.FieldSpec.Type.STRING
 import org.jetbrains.kotlin.gradle.plugin.mpp.apple.XCFramework
 import java.util.Properties
 
@@ -11,30 +12,27 @@ fun publicProperty(name: String): String =
         ?: providers.environmentVariable(name).orNull
         ?: ""
 
-fun asBuildConfigString(value: String): String =
-    "\"${value.replace("\\", "\\\\").replace("\"", "\\\"")}\""
-
 plugins {
     alias(libs.plugins.kotlin.multiplatform)
     alias(libs.plugins.android.kotlin.multiplatform.library)
     alias(libs.plugins.android.lint)
+    alias(libs.plugins.buildkonfig)
     id("org.jetbrains.kotlin.plugin.compose") version "2.2.21"
     id("org.jetbrains.kotlin.plugin.serialization") version "2.2.21"
     id("org.jetbrains.kotlin.native.cocoapods")
 }
 
-android {
-    buildFeatures {
-        buildConfig = true
-    }
-    defaultConfig {
-        buildConfigField("String", "SUPABASE_URL", asBuildConfigString(publicProperty("SUPABASE_URL")))
-        buildConfigField("String", "SUPABASE_PUBLISHABLE_KEY", asBuildConfigString(publicProperty("SUPABASE_PUBLISHABLE_KEY")))
+buildkonfig {
+    packageName = "com.example.shared.data"
+
+    defaultConfigs {
+        buildConfigField(STRING, "SUPABASE_URL", publicProperty("SUPABASE_URL"))
+        buildConfigField(STRING, "SUPABASE_PUBLISHABLE_KEY", publicProperty("SUPABASE_PUBLISHABLE_KEY"))
     }
 }
 
 kotlin {
-    androidLibrary {
+    android {
         namespace = "com.example.shared"
         compileSdk = 36
         minSdk = 24
