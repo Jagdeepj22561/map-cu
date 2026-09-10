@@ -12,7 +12,6 @@ app.use(cors());
 app.use(express.json());
 
 const requiredEnvironmentVariables = [
-  "API_KEY",
   "BREVO_API_KEY",
   "BREVO_SENDER_EMAIL",
   "SUPABASE_URL",
@@ -41,22 +40,10 @@ app.use(
   })
 );
 
-/* ================= API KEY ================= */
-
-app.use((req, res, next) => {
-  const clientKey = req.headers["x-api-key"];
-
-  if (!clientKey || clientKey !== process.env.API_KEY) {
-    return res.status(403).json({ error: "Unauthorized - Invalid API Key" });
-  }
-
-  return next();
-});
-
 /* ================= SUPABASE ================= */
 
-// This key bypasses Row Level Security. It must exist only in Render's
-// environment variables, never in the Android/iOS application or Git.
+// This service-role client bypasses Row Level Security. It is trusted-server
+// only and must never be shipped in the Android/iOS applications.
 const supabase = createClient(
   process.env.SUPABASE_URL,
   process.env.SUPABASE_SERVICE_ROLE_KEY,
@@ -65,14 +52,38 @@ const supabase = createClient(
       autoRefreshToken: false,
       persistSession: false,
     },
-    // Node 20 has no native WebSocket. Supabase initializes its Realtime
-    // client internally, so provide the Node transport even though this
-    // server only performs authenticated admin requests.
     realtime: {
       transport: WebSocket,
     },
   }
 );
+
+/* ================= AUTHENTICATED BACKEND ROUTES ================= */
+
+// Verify the caller's Supabase access token before allowing operations that
+// require an authenticated application user. The service-role client is used
+// only to validate the token; it is never exposed to the client.
+async function requireSupabaseUser(req, res, next) {
+  const authorization = String(req.headers.authorization || "");
+  const match = authorization.match(/^Bearer\s+(.+)$/i);
+
+  if (!match) {
+    return res.status(401).json({ error: "Authentication required" });
+  }
+
+  try {
+    const { data, error } = await supabase.auth.getUser(match[1]);
+    if (error || !data?.user) {
+      return res.status(401).json({ error: "Invalid or expired session" });
+    }
+
+    req.user = data.user;
+    return next();
+  } catch (error) {
+    console.error("Supabase token verification failed:", error);
+    return res.status(401).json({ error: "Invalid or expired session" });
+  }
+}
 
 /* ================= BREVO ================= */
 
@@ -97,8 +108,9 @@ const upload = multer({
 
 /* ================= OTP STORE ================= */
 
-// This preserves the current single-Render-instance behaviour. Move this to
-// Redis before scaling Render to multiple instances or restarting frequently.
+// Single-instance development implementation. Replace with Redis/managed KV
+// before horizontal scaling so OTP state survives restarts and is shared by
+// all instances.
 const otpStore = new Map();
 const EMAIL_TIMEOUT_MS = 20_000;
 
@@ -229,7 +241,9 @@ app.post("/verify-otp-create", async (req, res) => {
 
 /* ---------- IMAGE UPLOAD ---------- */
 
-app.post("/upload-image", upload.single("file"), async (req, res) => {
+// Image upload is a privileged backend operation and therefore requires the
+// same Supabase user session used by the application data layer.
+app.post("/upload-image", requireSupabaseUser, upload.single("file"), async (req, res) => {
   try {
     if (!req.file) return res.status(400).json({ error: "File not received" });
     if (!req.file.mimetype.startsWith("image/")) {
@@ -238,7 +252,10 @@ app.post("/upload-image", upload.single("file"), async (req, res) => {
 
     const result = await new Promise((resolve, reject) => {
       const stream = cloudinary.uploader.upload_stream(
-        { folder: "profile_pics" },
+        {
+          folder: "profile_pics",
+          context: { user_id: req.user.id },
+        },
         (error, uploadResult) => (error ? reject(error) : resolve(uploadResult))
       );
       stream.end(req.file.buffer);
