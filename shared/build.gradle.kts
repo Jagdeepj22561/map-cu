@@ -32,7 +32,7 @@ buildkonfig {
 }
 
 kotlin {
-    android {
+    androidLibrary {
         namespace = "com.example.shared"
         compileSdk = 36
         minSdk = 24
@@ -93,11 +93,10 @@ kotlin {
                 implementation("org.jetbrains.compose.material:material-icons-extended:1.7.1")
                 implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.8.1")
 
-                implementation(platform("io.github.jan-tennert.supabase:bom:3.5.0"))
-                implementation("io.github.jan-tennert.supabase:auth-kt")
-                implementation("io.github.jan-tennert.supabase:postgrest-kt")
-                implementation("io.github.jan-tennert.supabase:realtime-kt")
-                implementation("io.github.jan-tennert.supabase:storage-kt")
+                implementation("io.github.jan-tennert.supabase:auth-kt:3.5.0")
+                implementation("io.github.jan-tennert.supabase:postgrest-kt:3.5.0")
+                implementation("io.github.jan-tennert.supabase:realtime-kt:3.5.0")
+                implementation("io.github.jan-tennert.supabase:storage-kt:3.5.0")
                 implementation("io.ktor:ktor-client-core:3.0.3")
                 implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.8.1")
             }
