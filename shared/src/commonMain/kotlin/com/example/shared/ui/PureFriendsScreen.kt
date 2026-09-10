@@ -25,7 +25,7 @@ fun PureFriendsScreen() {
     var people by remember { mutableStateOf<List<FriendSuggestion>>(emptyList()) }
     var loading by remember { mutableStateOf(true) }
     var error by remember { mutableStateOf<String?>(null) }
-    var sentIds by remember { mutableStateOf<Set<String>>(emptySet()) }
+    var pendingIds by remember { mutableStateOf<Set<String>>(emptySet()) }
     var sendingIds by remember { mutableStateOf<Set<String>>(emptySet()) }
     val scope = rememberCoroutineScope()
 
@@ -34,7 +34,7 @@ fun PureFriendsScreen() {
         error = null
         runCatching {
             people = repository.discoverFriends()
-            sentIds = repository.getSentFriendRequestReceiverIds()
+            pendingIds = repository.getPendingFriendRequestUserIds()
         }.onFailure { error = it.message ?: "Unable to find people." }
         loading = false
     }
@@ -83,7 +83,7 @@ fun PureFriendsScreen() {
                 verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
                 items(people, key = { it.userId }) { person ->
-                    val isSent = person.userId in sentIds
+                    val isPending = person.userId in pendingIds
                     val isSending = person.userId in sendingIds
 
                     ElevatedCard(Modifier.fillMaxWidth(), shape = MaterialTheme.shapes.medium) {
@@ -102,9 +102,9 @@ fun PureFriendsScreen() {
                                 }
                             }
                             when {
-                                isSent -> AssistChip(
+                                isPending -> AssistChip(
                                     onClick = {},
-                                    label = { Text("Request Sent") }
+                                    label = { Text("Request Pending") }
                                 )
                                 isSending -> FilledTonalButton(
                                     onClick = {},
@@ -116,7 +116,7 @@ fun PureFriendsScreen() {
                                         scope.launch {
                                             runCatching {
                                                 repository.sendFriendRequest(person.userId)
-                                                sentIds = sentIds + person.userId
+                                                pendingIds = pendingIds + person.userId
                                             }.onFailure {
                                                 error = it.message ?: "Unable to send request."
                                             }
