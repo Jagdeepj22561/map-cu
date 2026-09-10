@@ -70,9 +70,18 @@ fun PureHomeScreen(
                         }
                     },
                     actions = {
-                        if (isSearching) IconButton(onClick = { onToggleSearch(false) }) { Icon(Icons.Default.Close, "Close search") }
-                        else {
+                        if (isSearching) {
+                            IconButton(onClick = { onToggleSearch(false) }) { Icon(Icons.Default.Close, "Close search") }
+                        } else {
                             IconButton(onClick = { onToggleSearch(true) }) { Icon(Icons.Default.Search, "Search") }
+                            if (currentScreen != PureAppScreen.GROUPS) {
+                                FilledTonalIconButton(
+                                    onClick = { onScreenSelected(PureAppScreen.GROUPS) },
+                                    modifier = Modifier.size(42.dp)
+                                ) {
+                                    Icon(Icons.Default.Groups, contentDescription = "Groups")
+                                }
+                            }
                             IconButton(onClick = onSettingsClick) { Icon(Icons.Default.Settings, "Settings") }
                         }
                     }
