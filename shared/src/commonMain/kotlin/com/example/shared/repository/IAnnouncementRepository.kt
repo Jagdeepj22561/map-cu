@@ -12,5 +12,3 @@ interface IAnnouncementRepository {
     suspend fun reportAnnouncement(announcementId: String, reporterUid: String, reason: String)
     suspend fun deleteAnnouncement(announcementId: String)
 }
-
-expect class AnnouncementRepository(): IAnnouncementRepository
