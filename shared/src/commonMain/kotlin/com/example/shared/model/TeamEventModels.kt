@@ -14,7 +14,7 @@ data class TeamRequirement(
     val authorId: String,
     val content: String,
     val membersNeeded: Int,
-    val createdAt: Long
+    val createdAt: String
 )
 
 data class FriendSuggestion(
