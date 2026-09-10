@@ -3,6 +3,7 @@ package com.example.shared.ui
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -11,6 +12,7 @@ import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Group
 import androidx.compose.material.icons.filled.Groups
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -263,7 +265,9 @@ private fun CommunityChatDialog(
     var loading by remember { mutableStateOf(true) }
     var sending by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
+    var showMenu by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
+    val listState = rememberLazyListState()
     val myUid = client.auth.currentUserOrNull()?.id
 
     suspend fun loadMessages() {
@@ -280,96 +284,107 @@ private fun CommunityChatDialog(
     }
 
     LaunchedEffect(community.id) { loadMessages() }
+    LaunchedEffect(messages.size) {
+        if (messages.isNotEmpty()) listState.animateScrollToItem(messages.lastIndex)
+    }
 
     Dialog(
         onDismissRequest = onDismiss,
         properties = DialogProperties(usePlatformDefaultWidth = false)
     ) {
-        Surface(
-            modifier = Modifier.fillMaxSize().padding(8.dp),
-            shape = RoundedCornerShape(22.dp),
-            color = MaterialTheme.colorScheme.surface
-        ) {
-            Column(Modifier.fillMaxSize()) {
-                Row(
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 10.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    IconButton(onClick = onDismiss) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back")
-                    }
-                    Column(Modifier.weight(1f)) {
-                        Text(community.name, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
-                        Text("Community", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    }
-                    IconButton(onClick = { scope.launch { loadMessages() } }) {
-                        Icon(Icons.Default.Refresh, "Refresh")
-                    }
-                }
-
-                HorizontalDivider()
-
-                when {
-                    loading -> Box(Modifier.weight(1f).fillMaxWidth(), Alignment.Center) { CircularProgressIndicator() }
-                    error != null -> Column(
-                        Modifier.weight(1f).fillMaxWidth().padding(24.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.Center
-                    ) {
-                        Text(error!!, color = MaterialTheme.colorScheme.error)
-                        Spacer(Modifier.height(10.dp))
-                        Button(onClick = { scope.launch { loadMessages() } }) { Text("Retry") }
-                    }
-                    else -> LazyColumn(
-                        Modifier.weight(1f).fillMaxWidth(),
-                        contentPadding = PaddingValues(12.dp),
-                        verticalArrangement = Arrangement.spacedBy(7.dp)
-                    ) {
-                        if (messages.isEmpty()) {
-                            item {
-                                Box(Modifier.fillMaxWidth().padding(vertical = 30.dp), Alignment.Center) {
-                                    Text("No messages yet. Start the conversation!", color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                }
-                            }
+        Scaffold(
+            containerColor = MaterialTheme.colorScheme.surface,
+            topBar = {
+                TopAppBar(
+                    navigationIcon = {
+                        IconButton(onClick = onDismiss) {
+                            Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back")
                         }
-                        items(messages, key = { it.id }) { message ->
-                            val isMe = message.senderId == myUid
-                            Row(
-                                Modifier.fillMaxWidth(),
-                                horizontalArrangement = if (isMe) Arrangement.End else Arrangement.Start
+                    },
+                    title = {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Surface(
+                                Modifier.size(40.dp),
+                                shape = CircleShape,
+                                color = MaterialTheme.colorScheme.primaryContainer
                             ) {
-                                Surface(
-                                    color = if (isMe) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant,
-                                    contentColor = if (isMe) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
-                                    shape = RoundedCornerShape(16.dp)
-                                ) {
-                                    Column(Modifier.widthIn(max = 300.dp).padding(horizontal = 13.dp, vertical = 9.dp)) {
-                                        if (!isMe) {
-                                            Text("Member", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
-                                            Spacer(Modifier.height(2.dp))
-                                        }
-                                        Text(message.content, style = MaterialTheme.typography.bodyLarge)
-                                    }
+                                Box(contentAlignment = Alignment.Center) {
+                                    Icon(Icons.Default.Groups, null, tint = MaterialTheme.colorScheme.primary)
                                 }
                             }
+                            Spacer(Modifier.width(12.dp))
+                            Column {
+                                Text(
+                                    community.name,
+                                    style = MaterialTheme.typography.titleMedium,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                                Text(
+                                    "Community",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
+                    },
+                    actions = {
+                        IconButton(onClick = { showMenu = true }) {
+                            Icon(Icons.Default.MoreVert, "More options")
+                        }
+                        DropdownMenu(
+                            expanded = showMenu,
+                            onDismissRequest = { showMenu = false }
+                        ) {
+                            DropdownMenuItem(
+                                text = { Text("Refresh") },
+                                leadingIcon = { Icon(Icons.Default.Refresh, null) },
+                                onClick = {
+                                    showMenu = false
+                                    scope.launch { loadMessages() }
+                                }
+                            )
                         }
                     }
-                }
-
-                Surface(tonalElevation = 3.dp) {
+                )
+            },
+            bottomBar = {
+                Surface(
+                    modifier = Modifier.fillMaxWidth().imePadding(),
+                    tonalElevation = 3.dp,
+                    shadowElevation = 8.dp,
+                    color = MaterialTheme.colorScheme.surface.copy(alpha = 0.98f)
+                ) {
                     Row(
-                        Modifier.fillMaxWidth().padding(8.dp),
+                        modifier = Modifier
+                            .padding(start = 10.dp, end = 12.dp, top = 8.dp, bottom = 10.dp)
+                            .fillMaxWidth(),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        OutlinedTextField(
+                        IconButton(onClick = { }) {
+                            Icon(
+                                Icons.Default.Add,
+                                "Attachment",
+                                tint = MaterialTheme.colorScheme.primary
+                            )
+                        }
+
+                        TextField(
                             value = input,
                             onValueChange = { input = it },
                             modifier = Modifier.weight(1f),
-                            placeholder = { Text("Message community…") },
+                            placeholder = { Text("Message...") },
                             maxLines = 4,
-                            shape = RoundedCornerShape(22.dp)
+                            shape = RoundedCornerShape(24.dp),
+                            colors = TextFieldDefaults.colors(
+                                focusedContainerColor = MaterialTheme.colorScheme.surfaceVariant,
+                                unfocusedContainerColor = MaterialTheme.colorScheme.surfaceVariant,
+                                focusedIndicatorColor = Color.Transparent,
+                                unfocusedIndicatorColor = Color.Transparent
+                            )
                         )
+
                         Spacer(Modifier.width(8.dp))
+
                         FloatingActionButton(
                             onClick = {
                                 val uid = myUid ?: return@FloatingActionButton
@@ -378,20 +393,145 @@ private fun CommunityChatDialog(
                                 sending = true
                                 scope.launch {
                                     runCatching {
-                                        client.from("group_messages").insert(CreateGroupMessageRow(community.id, uid, text))
+                                        client.from("group_messages").insert(
+                                            CreateGroupMessageRow(community.id, uid, text)
+                                        )
                                         input = ""
                                         loadMessages()
                                     }.onFailure { error = it.message ?: "Unable to send message." }
                                     sending = false
                                 }
                             },
-                            modifier = Modifier.size(48.dp)
+                            modifier = Modifier.size(46.dp),
+                            shape = CircleShape
                         ) {
-                            Icon(Icons.AutoMirrored.Filled.Send, "Send")
+                            Icon(Icons.AutoMirrored.Filled.Send, null)
+                        }
+                    }
+                }
+            }
+        ) { paddingValues ->
+            when {
+                loading -> Box(
+                    Modifier.fillMaxSize().padding(paddingValues),
+                    Alignment.Center
+                ) { CircularProgressIndicator() }
+
+                error != null -> Column(
+                    Modifier.fillMaxSize().padding(paddingValues).padding(24.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.Center
+                ) {
+                    Text(error!!, color = MaterialTheme.colorScheme.error)
+                    Spacer(Modifier.height(10.dp))
+                    Button(onClick = { scope.launch { loadMessages() } }) { Text("Retry") }
+                }
+
+                else -> LazyColumn(
+                    state = listState,
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(paddingValues),
+                    contentPadding = PaddingValues(start = 12.dp, top = 8.dp, end = 12.dp, bottom = 16.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    var previousDate: String? = null
+                    items(messages, key = { it.id }) { message ->
+                        val date = communityDateLabel(message.createdAt)
+                        if (date != previousDate) {
+                            DateHeader(date)
+                            previousDate = date
+                        }
+
+                        val isMe = message.senderId == myUid
+                        Row(
+                            Modifier.fillMaxWidth(),
+                            horizontalArrangement = if (isMe) Arrangement.End else Arrangement.Start
+                        ) {
+                            Surface(
+                                color = if (isMe) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant,
+                                contentColor = if (isMe) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
+                                shape = if (isMe) {
+                                    RoundedCornerShape(topStart = 16.dp, topEnd = 4.dp, bottomStart = 16.dp, bottomEnd = 16.dp)
+                                } else {
+                                    RoundedCornerShape(topStart = 4.dp, topEnd = 16.dp, bottomStart = 16.dp, bottomEnd = 16.dp)
+                                }
+                            ) {
+                                Column(
+                                    Modifier.widthIn(max = 300.dp).padding(horizontal = 13.dp, vertical = 9.dp)
+                                ) {
+                                    if (!isMe) {
+                                        Text(
+                                            "Member",
+                                            style = MaterialTheme.typography.labelSmall,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                        Spacer(Modifier.height(2.dp))
+                                    }
+                                    Text(message.content, style = MaterialTheme.typography.bodyLarge)
+                                    Spacer(Modifier.height(2.dp))
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.End
+                                    ) {
+                                        Text(
+                                            communityTimeLabel(message.createdAt),
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = if (isMe) MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.78f)
+                                            else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.70f)
+                                        )
+                                        if (isMe) {
+                                            Spacer(Modifier.width(4.dp))
+                                            Text("✓", style = MaterialTheme.typography.labelSmall)
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    if (messages.isEmpty()) {
+                        item {
+                            Box(Modifier.fillMaxWidth().padding(vertical = 30.dp), Alignment.Center) {
+                                Text(
+                                    "No messages yet. Start the conversation!",
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
                         }
                     }
                 }
             }
         }
     }
+}
+
+private fun communityDateLabel(value: String): String {
+    if (value.isBlank()) return "Today"
+    val date = value.substringBefore('T')
+    if (date.length != 10) return "Today"
+    val parts = date.split('-')
+    if (parts.size != 3) return "Today"
+    val months = listOf(
+        "January", "February", "March", "April", "May", "June",
+        "July", "August", "September", "October", "November", "December"
+    )
+    val month = parts[1].toIntOrNull()?.minus(1)
+    return if (month != null && month in months.indices) {
+        "${months[month]} ${parts[2].toIntOrNull() ?: parts[2]}, ${parts[0]}"
+    } else "Today"
+}
+
+private fun communityTimeLabel(value: String): String {
+    val time = value.substringAfter('T', "").substringBefore('.')
+    if (time.length < 5) return ""
+    val hour = time.substring(0, 2).toIntOrNull() ?: return ""
+    val minute = time.substring(3, 5)
+    val suffix = if (hour >= 12) "PM" else "AM"
+    val displayHour = when {
+        hour == 0 -> 12
+        hour > 12 -> hour - 12
+        else -> hour
+    }
+    return "%d:%s %s".format(displayHour, minute, suffix)
 }
