@@ -66,7 +66,10 @@ class TeamRepository {
     suspend fun getSentFriendRequestReceiverIds(): Set<String> {
         val uid = client.auth.currentUserOrNull()?.id ?: error("Login required")
         return client.from("friend_requests")
-            .select { filter { eq("sender_id", uid) } }
+            .select { filter {
+                eq("sender_id", uid)
+                eq("status", "pending")
+            } }
             .decodeList<FriendRequestRow>()
             .mapTo(mutableSetOf()) { it.receiverId }
     }
