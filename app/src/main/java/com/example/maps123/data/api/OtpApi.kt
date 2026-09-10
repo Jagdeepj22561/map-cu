@@ -1,10 +1,12 @@
 package com.example.maps123.data.api
 
+import com.example.maps123.data.supabase.SupabaseProvider
 import com.example.shared.model.ImageUploadResponse
 import com.example.shared.model.OtpRequest
 import com.example.shared.model.OtpStatusResponse
 import com.example.shared.model.TokenResponse
 import com.example.shared.model.VerifyCreateRequest
+import io.github.jan.supabase.auth.auth
 import okhttp3.Interceptor
 import okhttp3.MultipartBody
 import okhttp3.OkHttpClient
@@ -45,27 +47,29 @@ object ApiClient {
 
     private const val BASE_URL = "https://campus-map-backend-fpz8.onrender.com/"
 
-    private const val API_KEY = "super_secret_key_here"
-
+    /**
+     * Render endpoints no longer use a static API key embedded in the APK.
+     * Authenticated requests carry the current Supabase access token instead.
+     * OTP registration endpoints intentionally work without a user session.
+     */
     private val interceptor = Interceptor { chain ->
-        val request = chain.request().newBuilder()
-            .addHeader("x-api-key", API_KEY)
-            .addHeader("x-timestamp", System.currentTimeMillis().toString())
+        val requestBuilder = chain.request().newBuilder()
             .addHeader("Accept", "application/json")
-            .build()
-        chain.proceed(request)
+
+        SupabaseProvider.client.auth.currentSessionOrNull()?.accessToken?.let { token ->
+            requestBuilder.addHeader("Authorization", "Bearer $token")
+        }
+
+        chain.proceed(requestBuilder.build())
     }
 
     private val client = OkHttpClient.Builder()
-        // A Render/Brevo failure should show an error, not keep the register
-        // screen in a loading state for five minutes.
         .connectTimeout(20, TimeUnit.SECONDS)
         .readTimeout(30, TimeUnit.SECONDS)
         .writeTimeout(30, TimeUnit.SECONDS)
         .callTimeout(35, TimeUnit.SECONDS)
         .addInterceptor(interceptor)
         .build()
-
 
     val api: OtpApi = Retrofit.Builder()
         .baseUrl(BASE_URL)
