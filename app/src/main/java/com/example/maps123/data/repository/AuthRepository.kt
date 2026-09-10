@@ -17,9 +17,8 @@ import kotlinx.coroutines.withTimeout
 private const val AUTH_REQUEST_TIMEOUT_MS = 30_000L
 
 object AuthRepository {
-    
-    suspend fun login(email: String, pass: String): Result<String> {
-        return withContext(Dispatchers.IO) {
+    suspend fun login(email: String, pass: String): Result<String> =
+        withContext(Dispatchers.IO) {
             try {
                 val auth = SupabaseProvider.client.auth
                 Log.d("AuthRepository", "Starting Supabase login")
@@ -38,10 +37,9 @@ object AuthRepository {
                 Result.failure(Exception(loginErrorMessage(e), e))
             }
         }
-    }
 
-    suspend fun generateOtp(email: String): Result<Unit> {
-        return withContext(Dispatchers.IO) {
+    suspend fun generateOtp(email: String): Result<Unit> =
+        withContext(Dispatchers.IO) {
             try {
                 val res = withTimeout(AUTH_REQUEST_TIMEOUT_MS) {
                     ApiClient.api.generateOtp(OtpRequest(email.trim().lowercase()))
@@ -57,16 +55,24 @@ object AuthRepository {
                 Result.failure(e)
             }
         }
-    }
 
-    suspend fun verifyOtp(email: String, otp: String): Result<String> {
-        return withContext(Dispatchers.IO) {
+    /**
+     * Legacy endpoint retained for API compatibility only.
+     * The current registration flow is verifyAndRegister(), which creates the
+     * Supabase user and then the app signs in through Supabase Auth. Never
+     * synthesize a user ID from an email address.
+     */
+    suspend fun verifyOtp(email: String, otp: String): Result<String> =
+        withContext(Dispatchers.IO) {
             try {
                 val res = ApiClient.api.verifyOtp(com.example.shared.model.VerifyRequest(email, otp))
                 if (res.isSuccessful && res.body()?.status == "VERIFIED") {
-                    // Assuming the backend returns a UID or we just use the email as ID for now if UID is null
-                    val uid = res.body()?.uid ?: email.replace(".", "_").replace("@", "_")
-                    Result.success(uid)
+                    val uid = res.body()?.uid
+                    if (uid.isNullOrBlank()) {
+                        Result.failure(Exception("Verification succeeded but no Supabase user ID was returned"))
+                    } else {
+                        Result.success(uid)
+                    }
                 } else {
                     val errorBody = res.errorBody()?.string()
                     val errorMsg = res.body()?.error ?: res.body()?.message ?: errorBody ?: "Verification failed"
@@ -76,33 +82,30 @@ object AuthRepository {
                 Result.failure(e)
             }
         }
-    }
 
     suspend fun verifyAndRegister(
         email: String,
         otp: String,
         name: String,
         pass: String
-    ): Result<Unit> {
-        return withContext(Dispatchers.IO) {
-            try {
-                val res = ApiClient.api.verifyOtpCreate(
-                    VerifyCreateRequest(email, otp, pass, name)
-                )
-                if (res.isSuccessful && res.body()?.status == "USER_CREATED") {
-                    Result.success(Unit)
-                } else {
-                    Result.failure(Exception(res.body()?.message ?: "Registration failed"))
-                }
-            } catch (e: Exception) {
-                Result.failure(e)
+    ): Result<Unit> = withContext(Dispatchers.IO) {
+        try {
+            val res = ApiClient.api.verifyOtpCreate(
+                VerifyCreateRequest(email, otp, pass, name)
+            )
+            if (res.isSuccessful && res.body()?.status == "USER_CREATED") {
+                Result.success(Unit)
+            } else {
+                val errorBody = res.errorBody()?.string()
+                Result.failure(Exception(res.body()?.message ?: res.body()?.error ?: errorBody ?: "Registration failed"))
             }
+        } catch (e: Exception) {
+            Result.failure(e)
         }
     }
 
-
-    suspend fun sendPasswordResetEmail(email: String): Result<Unit> {
-        return withContext(Dispatchers.IO) {
+    suspend fun sendPasswordResetEmail(email: String): Result<Unit> =
+        withContext(Dispatchers.IO) {
             try {
                 withTimeout(AUTH_REQUEST_TIMEOUT_MS) {
                     SupabaseProvider.client.auth.resetPasswordForEmail(
@@ -115,7 +118,6 @@ object AuthRepository {
                 Result.failure(e)
             }
         }
-    }
 
     fun currentUserId(): String? = SupabaseProvider.client.auth.currentUserOrNull()?.id
 
