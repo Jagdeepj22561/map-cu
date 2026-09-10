@@ -41,8 +41,6 @@ class ChatRepository(private val context: Context) : IChatRepository {
         SupabaseProvider.client.auth.currentUserOrNull()?.id
 
     private suspend fun uid(): String {
-        // Restoring a persisted Supabase session is asynchronous on cold app
-        // start. Await it before actions such as accepting a friend request.
         SupabaseProvider.client.auth.awaitInitialization()
 
         return SupabaseProvider.client.auth.currentUserOrNull()?.id
@@ -237,7 +235,6 @@ class ChatRepository(private val context: Context) : IChatRepository {
             .firstOrNull()
             ?: return null
 
-        // 1. Mark request as accepted FIRST
         SupabaseProvider.client
             .from("friend_requests")
             .update({
@@ -248,26 +245,17 @@ class ChatRepository(private val context: Context) : IChatRepository {
                 }
             }
 
-        // 2. Create both friendship rows
         SupabaseProvider.client
             .from("friendships")
             .upsert(
                 listOf(
-                    FriendshipRow(
-                        mine,
-                        senderUid
-                    ),
-                    FriendshipRow(
-                        senderUid,
-                        mine
-                    )
+                    FriendshipRow(mine, senderUid),
+                    FriendshipRow(senderUid, mine)
                 )
             )
 
-        // 3. Remove local pending request
         dao.deleteRequest(request.id)
 
-        // 4. Return friend's profile
         return user(senderUid)
     }
 
@@ -337,16 +325,8 @@ class ChatRepository(private val context: Context) : IChatRepository {
 
         val mine = uid()
 
-        val id = getChatId(
-            mine,
-            friendUid
-        )
+        val id = getChatId(mine, friendUid)
 
-        // Create the chat and both members through
-        // the SECURITY DEFINER Supabase RPC.
-        //
-        // This version uses JsonObject because the installed
-        // Supabase Kotlin RPC API expects JsonObject parameters.
         SupabaseProvider.client.postgrest.rpc(
             function = "create_direct_chat",
             parameters = buildJsonObject {
@@ -356,7 +336,6 @@ class ChatRepository(private val context: Context) : IChatRepository {
         )
 
         val friend = user(friendUid)
-
         val old = dao.getChat(id)
 
         dao.insertChat(
@@ -366,8 +345,7 @@ class ChatRepository(private val context: Context) : IChatRepository {
                 friend?.name ?: friendName,
                 friend?.profilePicUrl,
                 old?.lastMessage ?: "New chat started",
-                old?.lastMessageTime
-                    ?: System.currentTimeMillis(),
+                old?.lastMessageTime ?: System.currentTimeMillis(),
                 old?.lastSeenTimestamp ?: 0L,
                 old?.unreadCount ?: 0,
                 old?.isBlocked ?: false
@@ -381,28 +359,17 @@ class ChatRepository(private val context: Context) : IChatRepository {
     // GHOST MODE
     // ---------------------------------------------------------
 
-    override suspend fun toggleGhostMode(
-        isGhostMode: Boolean
-    ) {
+    override suspend fun toggleGhostMode(isGhostMode: Boolean) =
         updateGhostMode(isGhostMode)
-    }
 
-    suspend fun updateGhostMode(
-        enabled: Boolean
-    ) {
-
+    suspend fun updateGhostMode(enabled: Boolean) {
         SupabaseProvider.client
             .from("profiles")
             .update({
                 set("ghost_mode", enabled)
-                set(
-                    "last_updated",
-                    System.currentTimeMillis()
-                )
+                set("last_updated", System.currentTimeMillis())
             }) {
-                filter {
-                    eq("id", uid())
-                }
+                filter { eq("id", uid()) }
             }
     }
 
@@ -410,45 +377,37 @@ class ChatRepository(private val context: Context) : IChatRepository {
     // CHAT SYNC
     // ---------------------------------------------------------
 
-    override fun listenToUserChats() =
-        startSync()
+    override fun listenToUserChats() = startSync()
 
-    fun listenToFriendRequests() =
-        startSync()
+    fun listenToFriendRequests() = startSync()
 
     override fun startSync() {
+        if (syncJob?.isActive == true) return
 
-        if (
-            syncJob?.isActive == true ||
-            getCurrentUserUid() == null
-        ) {
-            return
-        }
-
+        // Do not check currentUserOrNull() synchronously here. Supabase can
+        // still be restoring the persisted session during cold start. Waiting
+        // for auth initialization guarantees that existing server chats are
+        // loaded into Room and therefore appear in the main chat list.
         syncJob = scope.launch {
+            runCatching {
+                SupabaseProvider.client.auth.awaitInitialization()
+                uid()
+            }.onFailure {
+                Log.w("ChatRepository", "Chat sync could not initialize", it)
+                return@launch
+            }
 
             while (isActive) {
-
-                // Requests must not be held back if a separate
-                // chat-table migration or query fails.
                 runCatching {
                     refreshFriendRequestsNow(true)
                 }.onFailure {
-                    Log.w(
-                        "ChatRepository",
-                        "Friend request sync failed",
-                        it
-                    )
+                    Log.w("ChatRepository", "Friend request sync failed", it)
                 }
 
                 runCatching {
                     refreshUserChatsNow(true)
                 }.onFailure {
-                    Log.w(
-                        "ChatRepository",
-                        "Chat sync failed",
-                        it
-                    )
+                    Log.w("ChatRepository", "Chat sync failed", it)
                 }
 
                 delay(8_000)
@@ -456,76 +415,43 @@ class ChatRepository(private val context: Context) : IChatRepository {
         }
     }
 
-    suspend fun refreshUserChatsNow(
-        forceRefresh: Boolean = false
-    ) {
-
+    suspend fun refreshUserChatsNow(forceRefresh: Boolean = false) {
         val mine = uid()
 
         val memberships = SupabaseProvider.client
             .from("direct_chat_members")
             .select {
-                filter {
-                    eq("user_id", mine)
-                }
+                filter { eq("user_id", mine) }
             }
             .decodeList<ChatMemberRow>()
 
-        val seen = memberships
-            .map { it.chatId }
-            .toSet()
+        val seen = memberships.map { it.chatId }.toSet()
 
         memberships.forEach {
-            syncChat(
-                mine,
-                it.chatId
-            )
+            syncChat(mine, it.chatId)
         }
 
         dao.getAllChatsList()
-            .filterNot {
-                it.chatId in seen
-            }
-            .forEach {
-                dao.deleteChat(it.chatId)
-            }
+            .filterNot { it.chatId in seen }
+            .forEach { dao.deleteChat(it.chatId) }
     }
 
-    private suspend fun syncChat(
-        mine: String,
-        chatId: String
-    ) {
-
+    private suspend fun syncChat(mine: String, chatId: String) {
         val members = SupabaseProvider.client
             .from("direct_chat_members")
             .select {
-                filter {
-                    eq("chat_id", chatId)
-                }
+                filter { eq("chat_id", chatId) }
             }
             .decodeList<ChatMemberRow>()
 
-        val friendId = members
-            .firstOrNull {
-                it.userId != mine
-            }
-            ?.userId
-            ?: return
-
+        val friendId = members.firstOrNull { it.userId != mine }?.userId ?: return
         val friend = user(friendId)
 
         val latest = SupabaseProvider.client
             .from("messages")
             .select {
-                filter {
-                    eq("chat_id", chatId)
-                }
-
-                order(
-                    "created_at",
-                    Order.DESCENDING
-                )
-
+                filter { eq("chat_id", chatId) }
+                order("created_at", Order.DESCENDING)
                 limit(1)
             }
             .decodeList<MessageRow>()
@@ -537,16 +463,10 @@ class ChatRepository(private val context: Context) : IChatRepository {
             ChatEntity(
                 chatId,
                 friendId,
-                friend?.name
-                    ?: old?.friendName
-                    ?: "Unknown",
+                friend?.name ?: old?.friendName ?: "Unknown",
                 friend?.profilePicUrl,
-                latest?.preview()
-                    ?: old?.lastMessage
-                    ?: "New chat started",
-                latest?.time()
-                    ?: old?.lastMessageTime
-                    ?: 0L,
+                latest?.preview() ?: old?.lastMessage ?: "New chat started",
+                latest?.time() ?: old?.lastMessageTime ?: 0L,
                 old?.lastSeenTimestamp ?: 0L,
                 old?.unreadCount ?: 0,
                 old?.isBlocked ?: false
@@ -558,9 +478,7 @@ class ChatRepository(private val context: Context) : IChatRepository {
     // MESSAGES
     // ---------------------------------------------------------
 
-    fun setActiveChat(
-        chatId: String?
-    ) {
+    fun setActiveChat(chatId: String?) {
         activeChatId = chatId
     }
 
@@ -570,24 +488,12 @@ class ChatRepository(private val context: Context) : IChatRepository {
         friendUid: String,
         imageUrl: String? = null
     ) {
-
         val now = System.currentTimeMillis()
-
-        check(
-            now - lastMessageTime >= 400L
-        ) {
-            "You're sending too fast"
-        }
-
+        check(now - lastMessageTime >= 400L) { "You're sending too fast" }
         lastMessageTime = now
 
         val mine = uid()
-
-        // Make sure the chat exists.
-        createChatForFriend(
-            friendUid,
-            ""
-        )
+        createChatForFriend(friendUid, "")
 
         val row = MessageRow(
             UUID.randomUUID().toString(),
@@ -598,87 +504,46 @@ class ChatRepository(private val context: Context) : IChatRepository {
             if (imageUrl == null) "TEXT" else "IMAGE"
         )
 
-        // Local first
-        dao.insertMessage(
-            row.toEntity()
-        )
-
-        // Supabase
-        SupabaseProvider.client
-            .from("messages")
-            .insert(row)
-
-        dao.updateMessageSyncStatus(
-            row.id,
-            true
-        )
-
-        syncChat(
-            mine,
-            chatId
-        )
+        dao.insertMessage(row.toEntity())
+        SupabaseProvider.client.from("messages").insert(row)
+        dao.updateMessageSyncStatus(row.id, true)
+        syncChat(mine, chatId)
     }
 
-    suspend fun fetchNewMessages(
-        chatId: String
-    ) {
-
+    suspend fun fetchNewMessages(chatId: String) {
         val rows = SupabaseProvider.client
             .from("messages")
             .select {
-                filter {
-                    eq("chat_id", chatId)
-                }
-
-                order(
-                    "created_at",
-                    Order.ASCENDING
-                )
+                filter { eq("chat_id", chatId) }
+                order("created_at", Order.ASCENDING)
             }
             .decodeList<MessageRow>()
 
-        dao.insertMessages(
-            rows.map(MessageRow::toEntity)
-        )
+        dao.insertMessages(rows.map(MessageRow::toEntity))
 
-        if (activeChatId == chatId) {
-            markChatAsRead(chatId)
-        }
-
-        syncChat(
-            uid(),
-            chatId
-        )
+        if (activeChatId == chatId) markChatAsRead(chatId)
+        syncChat(uid(), chatId)
     }
 
     // ---------------------------------------------------------
     // COUNTS / SYNC CONTROL
     // ---------------------------------------------------------
 
-    fun getPendingRequestCount() =
-        dao.getPendingRequestCount()
+    fun getPendingRequestCount() = dao.getPendingRequestCount()
 
-    fun getTotalUnreadCount() =
-        dao.getTotalUnreadCount()
-            .map { it ?: 0 }
+    fun getTotalUnreadCount() = dao.getTotalUnreadCount().map { it ?: 0 }
 
     fun clearAllListeners() {
-
         activeChatId = null
-
         syncJob?.cancel()
-
         syncJob = null
     }
 
     suspend fun rewriteLocalDataAndSync() {
-
         clearAllListeners()
-
         dao.deleteAllMessages()
         dao.deleteAllChats()
         dao.deleteAllRequests()
-
         startSync()
     }
 
@@ -686,259 +551,114 @@ class ChatRepository(private val context: Context) : IChatRepository {
     // IMAGE
     // ---------------------------------------------------------
 
-    suspend fun uploadImage(
-        uri: Uri
-    ): String {
-
-        val file =
-            com.example.maps123.utils.ImageUtils
-                .uriToFile(
-                    context,
-                    uri
-                )
-
-        return com.example.maps123.utils.ImageUtils
-            .uploadImage(
-                com.example.maps123.utils.ImageUtils
-                    .compressProfileImage(
-                        context,
-                        file
-                    )
-            )
+    suspend fun uploadImage(uri: Uri): String {
+        val file = com.example.maps123.utils.ImageUtils.uriToFile(context, uri)
+        return com.example.maps123.utils.ImageUtils.uploadImage(
+            com.example.maps123.utils.ImageUtils.compressProfileImage(context, file)
+        )
     }
 
     // ---------------------------------------------------------
     // READ STATUS
     // ---------------------------------------------------------
 
-    suspend fun markChatAsRead(
-        chatId: String
-    ) {
-
+    suspend fun markChatAsRead(chatId: String) {
         val now = System.currentTimeMillis()
-
-        if (
-            now - lastReadUpdate < 2_000L
-        ) {
-            return
-        }
-
+        if (now - lastReadUpdate < 2_000L) return
         lastReadUpdate = now
 
         val mine = uid()
 
-        dao.getUnreadIncomingMessages(
-            chatId,
-            mine
-        ).forEach { message ->
-
+        dao.getUnreadIncomingMessages(chatId, mine).forEach { message ->
             SupabaseProvider.client
                 .from("messages")
-                .update({
-                    set(
-                        "read_at",
-                        "now()"
-                    )
-                }) {
+                .update({ set("read_at", "now()") }) {
                     filter {
-                        eq(
-                            "id",
-                            message.messageId
-                        )
-
-                        neq(
-                            "sender_id",
-                            mine
-                        )
+                        eq("id", message.messageId)
+                        neq("sender_id", mine)
                     }
                 }
-
-            dao.updateMessageReadStatus(
-                message.messageId,
-                true
-            )
+            dao.updateMessageReadStatus(message.messageId, true)
         }
 
-        dao.markChatAsRead(
-            chatId,
-            now
-        )
+        dao.markChatAsRead(chatId, now)
     }
 
     // ---------------------------------------------------------
     // CHAT ACTIONS
     // ---------------------------------------------------------
 
-    suspend fun clearChat(
-        chatId: String
-    ) =
-        dao.clearChatMessages(chatId)
+    suspend fun clearChat(chatId: String) = dao.clearChatMessages(chatId)
 
-    suspend fun deleteChat(
-        chatId: String
-    ) =
-        dao.deleteChat(chatId)
+    suspend fun deleteChat(chatId: String) = dao.deleteChat(chatId)
 
     // ---------------------------------------------------------
     // BLOCKING
     // ---------------------------------------------------------
 
-    suspend fun blockUser(
-        friendUid: String
-    ) {
-
-        SupabaseProvider.client
-            .from("blocks")
-            .upsert(
-                BlockRow(
-                    uid(),
-                    friendUid
-                )
-            )
-
-        dao.setBlocked(
-            friendUid,
-            true
-        )
+    suspend fun blockUser(friendUid: String) {
+        SupabaseProvider.client.from("blocks").upsert(BlockRow(uid(), friendUid))
+        dao.setBlocked(friendUid, true)
     }
 
-    suspend fun unblockUser(
-        friendUid: String
-    ) {
-
-        SupabaseProvider.client
-            .from("blocks")
-            .delete {
-                filter {
-                    eq(
-                        "user_id",
-                        uid()
-                    )
-
-                    eq(
-                        "blocked_user_id",
-                        friendUid
-                    )
-                }
+    suspend fun unblockUser(friendUid: String) {
+        SupabaseProvider.client.from("blocks").delete {
+            filter {
+                eq("user_id", uid())
+                eq("blocked_user_id", friendUid)
             }
-
-        dao.setBlocked(
-            friendUid,
-            false
-        )
+        }
+        dao.setBlocked(friendUid, false)
     }
 
-    suspend fun isUserBlocked(
-        friendUid: String
-    ) =
-        SupabaseProvider.client
-            .from("blocks")
-            .select {
-                filter {
-                    eq(
-                        "user_id",
-                        uid()
-                    )
-
-                    eq(
-                        "blocked_user_id",
-                        friendUid
-                    )
-                }
+    suspend fun isUserBlocked(friendUid: String) =
+        SupabaseProvider.client.from("blocks").select {
+            filter {
+                eq("user_id", uid())
+                eq("blocked_user_id", friendUid)
             }
-            .decodeList<BlockRow>()
-            .isNotEmpty()
+        }.decodeList<BlockRow>().isNotEmpty()
 
     // ---------------------------------------------------------
     // MESSAGE MANAGEMENT
     // ---------------------------------------------------------
 
-    suspend fun deleteMessagesLocally(
-        messageIds: List<String>
-    ) =
+    suspend fun deleteMessagesLocally(messageIds: List<String>) =
         dao.deleteMessages(messageIds)
 
-    suspend fun deleteMessagesForEveryone(
-        chatId: String,
-        messageIds: List<String>
-    ) {
-
-        SupabaseProvider.client
-            .from("messages")
-            .delete {
-                filter {
-                    eq(
-                        "chat_id",
-                        chatId
-                    )
-
-                    isIn(
-                        "id",
-                        messageIds
-                    )
-
-                    eq(
-                        "sender_id",
-                        uid()
-                    )
-                }
+    suspend fun deleteMessagesForEveryone(chatId: String, messageIds: List<String>) {
+        SupabaseProvider.client.from("messages").delete {
+            filter {
+                eq("chat_id", chatId)
+                isIn("id", messageIds)
+                eq("sender_id", uid())
             }
-
+        }
         dao.deleteMessages(messageIds)
     }
 
-    suspend fun editMessage(
-        chatId: String,
-        messageId: String,
-        newContent: String
-    ) {
-
-        SupabaseProvider.client
-            .from("messages")
-            .update({
-                set(
-                    "content",
-                    newContent.trim()
-                )
-            }) {
-                filter {
-                    eq(
-                        "id",
-                        messageId
-                    )
-
-                    eq(
-                        "chat_id",
-                        chatId
-                    )
-
-                    eq(
-                        "sender_id",
-                        uid()
-                    )
-                }
+    suspend fun editMessage(chatId: String, messageId: String, newContent: String) {
+        SupabaseProvider.client.from("messages").update({
+            set("content", newContent.trim())
+        }) {
+            filter {
+                eq("id", messageId)
+                eq("chat_id", chatId)
+                eq("sender_id", uid())
             }
-
-        dao.updateMessageContent(
-            messageId,
-            newContent.trim()
-        )
+        }
+        dao.updateMessageContent(messageId, newContent.trim())
     }
 
     // ---------------------------------------------------------
     // USER
     // ---------------------------------------------------------
 
-    private suspend fun user(
-        id: String
-    ): UserEntity? =
+    private suspend fun user(id: String): UserEntity? =
         SupabaseProvider.client
             .from("profiles")
             .select {
-                filter {
-                    eq("id", id)
-                }
-
+                filter { eq("id", id) }
                 limit(1)
             }
             .decodeList<ChatProfileRow>()
@@ -955,189 +675,120 @@ private data class ChatProfileRow(
     val id: String,
     val email: String,
     val name: String = "",
-
-    @SerialName("phone_number")
-    val phoneNumber: String = "",
-
+    @SerialName("phone_number") val phoneNumber: String = "",
     val year: String = "",
     val semester: String = "",
     val course: String = "",
     val university: String = "",
     val dob: String = "",
     val gender: String = "",
-
-    @SerialName("profile_pic_url")
-    val profilePicUrl: String = "",
-
-    @SerialName("instagram_link")
-    val instagramLink: String = "",
-
-    @SerialName("snapchat_link")
-    val snapchatLink: String = "",
-
-    @SerialName("linkedin_link")
-    val linkedinLink: String = "",
-
-    @SerialName("last_updated")
-    val lastUpdated: Long = 0,
-
+    @SerialName("profile_pic_url") val profilePicUrl: String = "",
+    @SerialName("instagram_link") val instagramLink: String = "",
+    @SerialName("snapchat_link") val snapchatLink: String = "",
+    @SerialName("linkedin_link") val linkedinLink: String = "",
+    @SerialName("last_updated") val lastUpdated: Long = 0,
     val latitude: Double = 0.0,
     val longitude: Double = 0.0,
-
-    @SerialName("ghost_mode")
-    val ghostMode: Boolean = false
+    @SerialName("ghost_mode") val ghostMode: Boolean = false
 ) {
-    fun toUser() =
-        UserEntity(
-            uid = id,
-            email = email,
-            name = name,
-            phoneNumber = phoneNumber,
-            year = year,
-            semester = semester,
-            course = course,
-            university = university,
-            dob = dob,
-            gender = gender,
-            profilePicUrl = profilePicUrl,
-            instagramLink = instagramLink,
-            snapchatLink = snapchatLink,
-            linkedinLink = linkedinLink,
-            lastUpdated = lastUpdated,
-            latitude = latitude,
-            longitude = longitude,
-            ghostMode = ghostMode
-        )
+    fun toUser() = UserEntity(
+        uid = id,
+        email = email,
+        name = name,
+        phoneNumber = phoneNumber,
+        year = year,
+        semester = semester,
+        course = course,
+        university = university,
+        dob = dob,
+        gender = gender,
+        profilePicUrl = profilePicUrl,
+        instagramLink = instagramLink,
+        snapchatLink = snapchatLink,
+        linkedinLink = linkedinLink,
+        lastUpdated = lastUpdated,
+        latitude = latitude,
+        longitude = longitude,
+        ghostMode = ghostMode
+    )
 }
 
 @Serializable
 private data class FriendshipRow(
-    @SerialName("user_id")
-    val userId: String,
-
-    @SerialName("friend_id")
-    val friendId: String
+    @SerialName("user_id") val userId: String,
+    @SerialName("friend_id") val friendId: String
 )
 
 @Serializable
 private data class FriendRequestInsert(
-    @SerialName("sender_id")
-    val senderId: String,
-
-    @SerialName("receiver_id")
-    val receiverId: String
+    @SerialName("sender_id") val senderId: String,
+    @SerialName("receiver_id") val receiverId: String
 )
 
 @Serializable
 private data class FriendRequestRow(
     val id: String,
-
-    @SerialName("sender_id")
-    val senderId: String,
-
-    @SerialName("receiver_id")
-    val receiverId: String,
-
-    @SerialName("created_at")
-    val createdAt: String
+    @SerialName("sender_id") val senderId: String,
+    @SerialName("receiver_id") val receiverId: String,
+    @SerialName("created_at") val createdAt: String
 ) {
-    fun time() =
-        java.time.OffsetDateTime
-            .parse(createdAt)
-            .toInstant()
-            .toEpochMilli()
+    fun time() = java.time.OffsetDateTime.parse(createdAt).toInstant().toEpochMilli()
 }
 
 @Serializable
-private data class DirectChatRow(
-    val id: String
-)
+private data class DirectChatRow(val id: String)
 
 @Serializable
 private data class ChatMemberRow(
-    @SerialName("chat_id")
-    val chatId: String,
-
-    @SerialName("user_id")
-    val userId: String
+    @SerialName("chat_id") val chatId: String,
+    @SerialName("user_id") val userId: String
 )
 
 @Serializable
 private data class MessageRow(
     val id: String,
-
-    @SerialName("chat_id")
-    val chatId: String,
-
-    @SerialName("sender_id")
-    val senderId: String,
-
+    @SerialName("chat_id") val chatId: String,
+    @SerialName("sender_id") val senderId: String,
     val content: String = "",
-
-    @SerialName("image_url")
-    val imageUrl: String? = null,
-
+    @SerialName("image_url") val imageUrl: String? = null,
     val type: String = "TEXT",
-
-    @SerialName("created_at")
-    val createdAt: String =
-        java.time.Instant.now().toString()
+    @SerialName("created_at") val createdAt: String = java.time.Instant.now().toString()
 ) {
+    fun time() = runCatching {
+        java.time.OffsetDateTime.parse(createdAt).toInstant().toEpochMilli()
+    }.getOrDefault(System.currentTimeMillis())
 
-    fun time() =
-        runCatching {
-            java.time.OffsetDateTime
-                .parse(createdAt)
-                .toInstant()
-                .toEpochMilli()
-        }.getOrDefault(
-            System.currentTimeMillis()
-        )
+    fun preview() = if (imageUrl.isNullOrBlank()) content else "Image"
 
-    fun preview() =
-        if (imageUrl.isNullOrBlank()) {
-            content
-        } else {
-            "Image"
-        }
-
-    fun toEntity() =
-        MessageEntity(
-            id,
-            chatId,
-            senderId,
-            content,
-            time(),
-            false,
-            true,
-            imageUrl,
-            type
-        )
+    fun toEntity() = MessageEntity(
+        id,
+        chatId,
+        senderId,
+        content,
+        time(),
+        false,
+        true,
+        imageUrl,
+        type
+    )
 }
 
 @Serializable
 private data class BlockRow(
-    @SerialName("user_id")
-    val userId: String,
-
-    @SerialName("blocked_user_id")
-    val blockedUserId: String
+    @SerialName("user_id") val userId: String,
+    @SerialName("blocked_user_id") val blockedUserId: String
 )
 
-private fun UserEntity.toPureUser() =
-    PureUser(
-        uid,
-        email,
-        name,
-        phoneNumber,
-        year,
-        semester,
-        course,
-        dob,
-        profilePicUrl,
-        lastUpdated,
-        GeoPoint(
-            latitude,
-            longitude
-        )
-    )
+private fun UserEntity.toPureUser() = PureUser(
+    uid,
+    email,
+    name,
+    phoneNumber,
+    year,
+    semester,
+    course,
+    dob,
+    profilePicUrl,
+    lastUpdated,
+    GeoPoint(latitude, longitude)
+)
