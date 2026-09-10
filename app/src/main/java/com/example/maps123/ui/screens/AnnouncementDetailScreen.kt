@@ -2,45 +2,34 @@ package com.example.maps123.ui.screens
 
 import android.content.Intent
 import android.widget.Toast
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ArrowBack
-import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
-import androidx.compose.material3.TopAppBar
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.runtime.setValue
-import androidx.compose.ui.Alignment
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.unit.dp
 import com.example.maps123.data.repository.AnnouncementRepository
+import com.example.maps123.data.repository.AuthRepository
 import com.example.maps123.data.repository.ChatRepository
+import com.example.maps123.ui.components.AppAsyncImage
 import com.example.maps123.utils.DateUtils
 import com.example.maps123.utils.PostLinks
 import com.example.shared.model.Announcement
-import com.example.shared.ui.*
-import com.example.maps123.data.repository.AuthRepository
-import com.example.maps123.ui.components.AppAsyncImage
+import com.example.shared.model.Comment
+import com.example.shared.ui.PureAnnouncementDetailScreen
+import com.example.shared.ui.PureReportDialog
+import com.example.shared.ui.PureSharePostDialog
 import kotlinx.coroutines.launch
+import java.util.UUID
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AnnouncementDetailScreen(
     announcementId: String,
@@ -55,32 +44,29 @@ fun AnnouncementDetailScreen(
     var post by remember(announcementId) { mutableStateOf<Announcement?>(null) }
     var errorMessage by remember { mutableStateOf<String?>(null) }
     var loading by remember(announcementId) { mutableStateOf(true) }
-
-    val currentUid = AuthRepository.currentUserId()
-
     var showReportDialog by remember { mutableStateOf(false) }
     var showDeleteConfirm by remember { mutableStateOf(false) }
+    var showCommentDialog by remember { mutableStateOf(false) }
+    var commentText by remember { mutableStateOf("") }
+    var showShareDialog by remember { mutableStateOf(false) }
+    var saved by remember(announcementId) { mutableStateOf(false) }
+
+    val currentUid = AuthRepository.currentUserId()
 
     LaunchedEffect(announcementId) {
         loading = true
         errorMessage = null
-
         val loadedPost = runCatching { repo.getAnnouncement(announcementId) }
-            .onFailure {
-                errorMessage = it.message ?: "Failed to open post"
-            }
+            .onFailure { errorMessage = it.message ?: "Failed to open post" }
             .getOrNull()
-
         if (loadedPost == null) {
             post = null
             loading = false
-            if (errorMessage == null) {
-                errorMessage = "Post not found or unavailable"
-            }
+            if (errorMessage == null) errorMessage = "Post not found or unavailable"
             return@LaunchedEffect
         }
-
         post = loadedPost
+        saved = context.getSharedPreferences("saved_announcements", 0).getBoolean(announcementId, false)
         loading = false
     }
 
@@ -110,14 +96,7 @@ fun AnnouncementDetailScreen(
         errorMessage = errorMessage,
         currentUid = currentUid,
         onBack = onBack,
-        onShareClick = {
-            val shareText = PostLinks.buildShareMessage(post?.title, announcementId)
-            val shareIntent = Intent(Intent.ACTION_SEND).apply {
-                type = "text/plain"
-                putExtra(Intent.EXTRA_TEXT, shareText)
-            }
-            context.startActivity(Intent.createChooser(shareIntent, "Share post"))
-        },
+        onShareClick = { showShareDialog = true },
         onCopyIdClick = {
             post?.id?.let { id ->
                 clipboard.setText(AnnotatedString(id))
@@ -127,11 +106,129 @@ fun AnnouncementDetailScreen(
         onContactAuthor = { announcement -> contactAuthorPrivately(announcement) },
         onReport = { showReportDialog = true },
         onDelete = { showDeleteConfirm = true },
+        onLike = {
+            val current = post ?: return@PureAnnouncementDetailScreen
+            val uid = currentUid ?: run {
+                Toast.makeText(context, "Login required", Toast.LENGTH_SHORT).show()
+                return@PureAnnouncementDetailScreen
+            }
+            val wasLiked = current.likes.containsKey(uid)
+            val shouldLike = !wasLiked
+            post = current.copy(
+                likes = current.likes.toMutableMap().apply {
+                    if (shouldLike) put(uid, true) else remove(uid)
+                }
+            )
+            scope.launch {
+                runCatching { repo.setLike(current.id, shouldLike) }
+                    .onFailure {
+                        post = current
+                        Toast.makeText(context, it.message ?: "Could not update like", Toast.LENGTH_SHORT).show()
+                    }
+            }
+        },
+        onComment = { showCommentDialog = true },
+        onSave = {
+            val id = post?.id ?: return@PureAnnouncementDetailScreen
+            saved = !saved
+            context.getSharedPreferences("saved_announcements", 0)
+                .edit()
+                .putBoolean(id, saved)
+                .apply()
+            Toast.makeText(context, if (saved) "Post saved" else "Removed from saved posts", Toast.LENGTH_SHORT).show()
+        },
+        isLikedByCurrentUser = post?.likes?.containsKey(currentUid) == true,
+        isSaved = saved,
+        likeCount = post?.likes?.size ?: 0,
+        commentCount = post?.comments?.size ?: 0,
         formatTime = { timestamp -> DateUtils.getRelativeTime(timestamp) },
         renderImage = { url, modifier, scale ->
             AppAsyncImage(model = url, contentDescription = null, modifier = modifier, contentScale = scale)
         }
     )
+
+    if (showCommentDialog && post != null) {
+        AlertDialog(
+            onDismissRequest = { showCommentDialog = false },
+            title = { Text("Comments") },
+            text = {
+                Column {
+                    if (post!!.comments.isEmpty()) {
+                        Text("No comments yet. Be the first to comment.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    } else {
+                        LazyColumn(modifier = Modifier.height(220.dp)) {
+                            items(post!!.comments.values.toList()) { comment ->
+                                Column(modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp)) {
+                                    Text(comment.userName.ifBlank { "Member" }, style = MaterialTheme.typography.labelLarge)
+                                    Text(comment.text, style = MaterialTheme.typography.bodyMedium)
+                                }
+                            }
+                        }
+                    }
+                    Spacer(Modifier.height(10.dp))
+                    OutlinedTextField(
+                        value = commentText,
+                        onValueChange = { commentText = it },
+                        modifier = Modifier.fillMaxWidth(),
+                        label = { Text("Add a comment") },
+                        minLines = 2,
+                        maxLines = 4
+                    )
+                }
+            },
+            confirmButton = {
+                Button(
+                    enabled = commentText.isNotBlank() && currentUid != null,
+                    onClick = {
+                        val current = post ?: return@Button
+                        val uid = currentUid ?: return@Button
+                        val text = commentText.trim()
+                        val comment = Comment(
+                            id = UUID.randomUUID().toString(),
+                            userId = uid,
+                            userName = AuthRepository.currentUserEmail()?.substringBefore("@").orEmpty().ifBlank { "You" },
+                            userProfilePic = null,
+                            text = text,
+                            timestamp = System.currentTimeMillis()
+                        )
+                        scope.launch {
+                            runCatching { repo.addComment(current.id, text, comment) }
+                                .onSuccess {
+                                    post = current.copy(comments = current.comments + (comment.id to comment))
+                                    commentText = ""
+                                    Toast.makeText(context, "Comment added", Toast.LENGTH_SHORT).show()
+                                }
+                                .onFailure {
+                                    Toast.makeText(context, it.message ?: "Could not add comment", Toast.LENGTH_SHORT).show()
+                                }
+                        }
+                    }
+                ) { Text("Comment") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showCommentDialog = false }) { Text("Close") }
+            }
+        )
+    }
+
+    if (showShareDialog && post != null) {
+        val shareText = PostLinks.buildShareMessage(post!!.title, announcementId)
+        PureSharePostDialog(
+            link = shareText,
+            onDismiss = { showShareDialog = false },
+            onCopy = {
+                clipboard.setText(AnnotatedString(shareText))
+                Toast.makeText(context, "Share link copied", Toast.LENGTH_SHORT).show()
+            },
+            onShareViaApp = {
+                context.startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).apply {
+                    type = "text/plain"
+                    putExtra(Intent.EXTRA_TEXT, shareText)
+                }, "Share post"))
+                showShareDialog = false
+            }
+        )
+    }
 
     if (showReportDialog && post != null && currentUid != null) {
         PureReportDialog(
@@ -154,19 +251,19 @@ fun AnnouncementDetailScreen(
         AlertDialog(
             onDismissRequest = { showDeleteConfirm = false },
             confirmButton = {
-                TextButton(
-                    onClick = {
-                        scope.launch {
+                TextButton(onClick = {
+                    scope.launch {
+                        try {
                             repo.deleteAnnouncement(post!!.id)
                             Toast.makeText(context, "Deleted", Toast.LENGTH_SHORT).show()
                             onBack()
+                        } catch (e: Exception) {
+                            Toast.makeText(context, e.message ?: "Delete failed", Toast.LENGTH_SHORT).show()
                         }
                     }
-                ) { Text("Delete", color = MaterialTheme.colorScheme.error) }
+                }) { Text("Delete", color = MaterialTheme.colorScheme.error) }
             },
-            dismissButton = {
-                TextButton(onClick = { showDeleteConfirm = false }) { Text("Cancel") }
-            },
+            dismissButton = { TextButton(onClick = { showDeleteConfirm = false }) { Text("Cancel") } },
             title = { Text("Delete post?") },
             text = { Text("This cannot be undone.") }
         )
