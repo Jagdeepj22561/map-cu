@@ -15,6 +15,7 @@ class TeamRepository {
     @Serializable private data class TeamRow(val id: String)
     @Serializable private data class MemberInsert(@SerialName("team_id") val teamId: String, @SerialName("user_id") val userId: String, val role: String = "member")
     @Serializable private data class FriendRequestInsert(@SerialName("sender_id") val senderId: String, @SerialName("receiver_id") val receiverId: String)
+    @Serializable private data class FriendRequestRow(@SerialName("receiver_id") val receiverId: String)
     @Serializable private data class DiscoveryParams(@SerialName("p_limit") val limit: Int)
     @Serializable private data class DiscoveryRow(@SerialName("user_id") val userId: String, val name: String, val email: String, @SerialName("profile_pic_url") val profilePicUrl: String = "", val course: String = "", val year: String = "", val semester: String = "", val score: Int = 0, val reasons: List<String> = emptyList())
 
@@ -54,16 +55,20 @@ class TeamRepository {
     suspend fun sendFriendRequest(receiverId: String) {
         val uid = client.auth.currentUserOrNull()?.id ?: error("Login required")
         require(uid != receiverId)
-
-        // Friend requests are idempotent: the database has a unique
-        // (sender_id, receiver_id) constraint, so retrying an already-sent
-        // request must not surface a duplicate-key error to the user.
         client.from("friend_requests").upsert(
             FriendRequestInsert(uid, receiverId)
         ) {
             onConflict = "sender_id,receiver_id"
             ignoreDuplicates = true
         }
+    }
+
+    suspend fun getSentFriendRequestReceiverIds(): Set<String> {
+        val uid = client.auth.currentUserOrNull()?.id ?: error("Login required")
+        return client.from("friend_requests")
+            .select { filter { eq("sender_id", uid) } }
+            .decodeList<FriendRequestRow>()
+            .mapTo(mutableSetOf()) { it.receiverId }
     }
 
     suspend fun discoverFriends(limit: Int = 30): List<FriendSuggestion> =
