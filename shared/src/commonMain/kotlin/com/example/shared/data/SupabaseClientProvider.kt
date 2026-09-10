@@ -3,7 +3,6 @@ package com.example.shared.data
 import io.github.jan.supabase.createSupabaseClient
 import io.github.jan.supabase.postgrest.Postgrest
 import io.github.jan.supabase.realtime.Realtime
-import io.ktor.client.HttpClient
 
 object SupabaseClientProvider {
     val client by lazy {
@@ -12,8 +11,7 @@ object SupabaseClientProvider {
 
         createSupabaseClient(
             supabaseUrl = SupabaseConfig.url,
-            supabaseKey = SupabaseConfig.publishableKey,
-            httpClient = HttpClient()
+            supabaseKey = SupabaseConfig.publishableKey
         ) {
             install(Postgrest)
             install(Realtime)
