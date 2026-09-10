@@ -1,0 +1,24 @@
+create or replace function public.increment_announcement_view(p_announcement_id text)
+returns integer
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+    new_count integer;
+begin
+    if auth.uid() is null then
+        raise exception 'authentication required';
+    end if;
+
+    update public.announcements
+    set view_count = view_count + 1,
+        updated_at = now()
+    where id = p_announcement_id
+    returning view_count into new_count;
+
+    return new_count;
+end;
+$$;
+
+grant execute on function public.increment_announcement_view(text) to authenticated;
