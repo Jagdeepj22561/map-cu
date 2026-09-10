@@ -15,7 +15,10 @@ class TeamRepository {
     @Serializable private data class TeamRow(val id: String)
     @Serializable private data class MemberInsert(@SerialName("team_id") val teamId: String, @SerialName("user_id") val userId: String, val role: String = "member")
     @Serializable private data class FriendRequestInsert(@SerialName("sender_id") val senderId: String, @SerialName("receiver_id") val receiverId: String)
-    @Serializable private data class FriendRequestRow(@SerialName("receiver_id") val receiverId: String)
+    @Serializable private data class FriendRequestRow(
+        @SerialName("sender_id") val senderId: String,
+        @SerialName("receiver_id") val receiverId: String
+    )
     @Serializable private data class DiscoveryParams(@SerialName("p_limit") val limit: Int)
     @Serializable private data class DiscoveryRow(@SerialName("user_id") val userId: String, val name: String, val email: String, @SerialName("profile_pic_url") val profilePicUrl: String = "", val course: String = "", val year: String = "", val semester: String = "", val score: Int = 0, val reasons: List<String> = emptyList())
 
@@ -63,15 +66,15 @@ class TeamRepository {
         }
     }
 
-    suspend fun getSentFriendRequestReceiverIds(): Set<String> {
+    suspend fun getPendingFriendRequestUserIds(): Set<String> {
         val uid = client.auth.currentUserOrNull()?.id ?: error("Login required")
-        return client.from("friend_requests")
-            .select { filter {
-                eq("sender_id", uid)
-                eq("status", "pending")
-            } }
+        val requests = client.from("friend_requests")
+            .select { filter { eq("status", "pending"); eq("sender_id", uid) } }
             .decodeList<FriendRequestRow>()
-            .mapTo(mutableSetOf()) { it.receiverId }
+        val incoming = client.from("friend_requests")
+            .select { filter { eq("status", "pending"); eq("receiver_id", uid) } }
+            .decodeList<FriendRequestRow>()
+        return (requests.asSequence().map { it.receiverId } + incoming.asSequence().map { it.senderId }).toSet()
     }
 
     suspend fun discoverFriends(limit: Int = 30): List<FriendSuggestion> =
