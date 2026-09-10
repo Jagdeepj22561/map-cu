@@ -50,23 +50,16 @@ class ChatRepository(private val context: Context) : IChatRepository {
     fun getMessages(chatId: String): Flow<List<MessageEntity>> =
         dao.getMessages(chatId)
 
-    // ---------------------------------------------------------
-    // FRIENDS
-    // ---------------------------------------------------------
-
     override suspend fun getFriends(): List<PureUser> =
         getFriendsImplementation().map(UserEntity::toPureUser)
 
     suspend fun getFriendsImplementation(
         forceRefresh: Boolean = false
     ): List<UserEntity> {
-
         val ids = SupabaseProvider.client
             .from("friendships")
             .select {
-                filter {
-                    eq("user_id", uid())
-                }
+                filter { eq("user_id", uid()) }
             }
             .decodeList<FriendshipRow>()
             .map { it.friendId }
@@ -75,14 +68,8 @@ class ChatRepository(private val context: Context) : IChatRepository {
             ids.forEach { friendId ->
                 user(friendId)?.let(::add)
             }
-        }.sortedBy {
-            it.name.lowercase()
-        }
+        }.sortedBy { it.name.lowercase() }
     }
-
-    // ---------------------------------------------------------
-    // NEARBY USERS
-    // ---------------------------------------------------------
 
     override suspend fun getNearbyUsers(
         lat: Double,
@@ -101,39 +88,24 @@ class ChatRepository(private val context: Context) : IChatRepository {
             }
             .decodeList<ChatProfileRow>()
             .map(ChatProfileRow::toUser)
-            .filter {
-                it.uid != getCurrentUserUid() && !it.ghostMode
-            }
+            .filter { it.uid != getCurrentUserUid() && !it.ghostMode }
 
     fun getNearbyUsersLastRefreshTime() = 0L
-
     fun getNearbyUsersRefreshRemainingMs() = 0L
 
-    // ---------------------------------------------------------
-    // FRIEND REQUESTS
-    // ---------------------------------------------------------
-
     override suspend fun sendFriendRequest(email: String) {
-
         val mine = uid()
-
         val target = SupabaseProvider.client
             .from("profiles")
             .select {
-                filter {
-                    eq("email", email.trim())
-                }
+                filter { eq("email", email.trim()) }
                 limit(1)
             }
             .decodeList<ChatProfileRow>()
             .firstOrNull()
-            ?: error(
-                "Friend request failed: User with email '$email' not found."
-            )
+            ?: error("Friend request failed: User with email '$email' not found.")
 
-        require(target.id != mine) {
-            "You cannot send a friend request to yourself."
-        }
+        require(target.id != mine) { "You cannot send a friend request to yourself." }
 
         val exists = SupabaseProvider.client
             .from("friendships")
@@ -146,26 +118,15 @@ class ChatRepository(private val context: Context) : IChatRepository {
             .decodeList<FriendshipRow>()
             .isNotEmpty()
 
-        if (exists) {
-            error("You are already friends with this user.")
-        }
+        if (exists) error("You are already friends with this user.")
 
         SupabaseProvider.client
             .from("friend_requests")
-            .insert(
-                FriendRequestInsert(
-                    mine,
-                    target.id
-                )
-            )
+            .insert(FriendRequestInsert(mine, target.id))
     }
 
-    suspend fun refreshFriendRequestsNow(
-        forceRefresh: Boolean = false
-    ) {
-
+    suspend fun refreshFriendRequestsNow(forceRefresh: Boolean = false) {
         val mine = uid()
-
         val rows = SupabaseProvider.client
             .from("friend_requests")
             .select {
@@ -173,12 +134,7 @@ class ChatRepository(private val context: Context) : IChatRepository {
                     eq("receiver_id", mine)
                     eq("status", "pending")
                 }
-
-                order(
-                    "created_at",
-                    Order.DESCENDING
-                )
-
+                order("created_at", Order.DESCENDING)
                 limit(50)
             }
             .decodeList<FriendRequestRow>()
@@ -197,29 +153,15 @@ class ChatRepository(private val context: Context) : IChatRepository {
             }
         }
 
-        requests.forEach { request ->
-            dao.insertRequest(request)
-        }
-
-        val keep = requests
-            .map { it.requestId }
-            .toSet()
-
+        requests.forEach { dao.insertRequest(it) }
+        val keep = requests.map { it.requestId }.toSet()
         dao.getAllRequestsList()
-            .filterNot {
-                it.requestId in keep
-            }
-            .forEach {
-                dao.deleteRequest(it.requestId)
-            }
+            .filterNot { it.requestId in keep }
+            .forEach { dao.deleteRequest(it.requestId) }
     }
 
-    suspend fun acceptFriendRequest(
-        senderUid: String
-    ): UserEntity? {
-
+    suspend fun acceptFriendRequest(senderUid: String): UserEntity? {
         val mine = uid()
-
         val request = SupabaseProvider.client
             .from("friend_requests")
             .select {
@@ -228,21 +170,15 @@ class ChatRepository(private val context: Context) : IChatRepository {
                     eq("receiver_id", mine)
                     eq("status", "pending")
                 }
-
                 limit(1)
             }
             .decodeList<FriendRequestRow>()
-            .firstOrNull()
-            ?: return null
+            .firstOrNull() ?: return null
 
         SupabaseProvider.client
             .from("friend_requests")
-            .update({
-                set("status", "accepted")
-            }) {
-                filter {
-                    eq("id", request.id)
-                }
+            .update({ set("status", "accepted") }) {
+                filter { eq("id", request.id) }
             }
 
         SupabaseProvider.client
@@ -255,76 +191,48 @@ class ChatRepository(private val context: Context) : IChatRepository {
             )
 
         dao.deleteRequest(request.id)
-
         return user(senderUid)
     }
 
-    suspend fun rejectFriendRequest(
-        senderUid: String
-    ) {
-
+    suspend fun rejectFriendRequest(senderUid: String) {
         SupabaseProvider.client
             .from("friend_requests")
-            .update({
-                set("status", "rejected")
-            }) {
+            .update({ set("status", "rejected") }) {
                 filter {
                     eq("sender_id", senderUid)
                     eq("receiver_id", uid())
                     eq("status", "pending")
                 }
             }
-
         refreshFriendRequestsNow(true)
     }
 
-    suspend fun unfriendUser(
-        friendUid: String
-    ) {
-
+    suspend fun unfriendUser(friendUid: String) {
         val mine = uid()
-
-        SupabaseProvider.client
-            .from("friendships")
-            .delete {
-                filter {
-                    eq("user_id", mine)
-                    eq("friend_id", friendUid)
-                }
+        SupabaseProvider.client.from("friendships").delete {
+            filter {
+                eq("user_id", mine)
+                eq("friend_id", friendUid)
             }
-
-        SupabaseProvider.client
-            .from("friendships")
-            .delete {
-                filter {
-                    eq("user_id", friendUid)
-                    eq("friend_id", mine)
-                }
+        }
+        SupabaseProvider.client.from("friendships").delete {
+            filter {
+                eq("user_id", friendUid)
+                eq("friend_id", mine)
             }
+        }
     }
 
-    // ---------------------------------------------------------
-    // DIRECT CHAT
-    // ---------------------------------------------------------
-
-    override suspend fun getChatId(
-        myUid: String,
-        friendUid: String
-    ): String =
+    override suspend fun getChatId(myUid: String, friendUid: String): String =
         UUID.nameUUIDFromBytes(
-            listOf(myUid, friendUid)
-                .sorted()
-                .joinToString(":")
-                .toByteArray()
+            listOf(myUid, friendUid).sorted().joinToString(":").toByteArray()
         ).toString()
 
     override suspend fun createChatForFriend(
         friendUid: String,
         friendName: String
     ): String {
-
         val mine = uid()
-
         val id = getChatId(mine, friendUid)
 
         SupabaseProvider.client.postgrest.rpc(
@@ -355,39 +263,24 @@ class ChatRepository(private val context: Context) : IChatRepository {
         return id
     }
 
-    // ---------------------------------------------------------
-    // GHOST MODE
-    // ---------------------------------------------------------
-
     override suspend fun toggleGhostMode(isGhostMode: Boolean) =
         updateGhostMode(isGhostMode)
 
     suspend fun updateGhostMode(enabled: Boolean) {
-        SupabaseProvider.client
-            .from("profiles")
-            .update({
-                set("ghost_mode", enabled)
-                set("last_updated", System.currentTimeMillis())
-            }) {
-                filter { eq("id", uid()) }
-            }
+        SupabaseProvider.client.from("profiles").update({
+            set("ghost_mode", enabled)
+            set("last_updated", System.currentTimeMillis())
+        }) {
+            filter { eq("id", uid()) }
+        }
     }
 
-    // ---------------------------------------------------------
-    // CHAT SYNC
-    // ---------------------------------------------------------
-
     override fun listenToUserChats() = startSync()
-
     fun listenToFriendRequests() = startSync()
 
     override fun startSync() {
         if (syncJob?.isActive == true) return
 
-        // Do not check currentUserOrNull() synchronously here. Supabase can
-        // still be restoring the persisted session during cold start. Waiting
-        // for auth initialization guarantees that existing server chats are
-        // loaded into Room and therefore appear in the main chat list.
         syncJob = scope.launch {
             runCatching {
                 SupabaseProvider.client.auth.awaitInitialization()
@@ -398,17 +291,11 @@ class ChatRepository(private val context: Context) : IChatRepository {
             }
 
             while (isActive) {
-                runCatching {
-                    refreshFriendRequestsNow(true)
-                }.onFailure {
-                    Log.w("ChatRepository", "Friend request sync failed", it)
-                }
+                runCatching { refreshFriendRequestsNow(true) }
+                    .onFailure { Log.w("ChatRepository", "Friend request sync failed", it) }
 
-                runCatching {
-                    refreshUserChatsNow(true)
-                }.onFailure {
-                    Log.w("ChatRepository", "Chat sync failed", it)
-                }
+                runCatching { refreshUserChatsNow(true) }
+                    .onFailure { Log.w("ChatRepository", "Chat sync failed", it) }
 
                 delay(8_000)
             }
@@ -427,13 +314,52 @@ class ChatRepository(private val context: Context) : IChatRepository {
 
         val seen = memberships.map { it.chatId }.toSet()
 
-        memberships.forEach {
-            syncChat(mine, it.chatId)
-        }
+        memberships.forEach { syncChat(mine, it.chatId) }
 
-        dao.getAllChatsList()
-            .filterNot { it.chatId in seen }
-            .forEach { dao.deleteChat(it.chatId) }
+        // IMPORTANT: do not delete Room chats merely because the server query
+        // did not return them. Room is the offline cache, and older chats can
+        // exist locally from before the Supabase chat migration. Deleting them
+        // here was the reason existing conversations disappeared from the list.
+        // A successful server sync will update them; otherwise the cached chat
+        // remains visible and usable.
+
+        restoreCachedChats(mine, seen)
+    }
+
+    private suspend fun restoreCachedChats(mine: String, serverChatIds: Set<String>) {
+        val localMessages = dao.getAllMessages()
+        if (localMessages.isEmpty()) return
+
+        val friends = runCatching { getFriendsImplementation(true) }.getOrElse { emptyList() }
+        if (friends.isEmpty()) return
+
+        val messageChatIds = localMessages.map { it.chatId }.toSet()
+
+        friends.forEach { friend ->
+            val chatId = getChatId(mine, friend.uid)
+            if (chatId in serverChatIds || chatId !in messageChatIds) return@forEach
+
+            val latest = localMessages
+                .asSequence()
+                .filter { it.chatId == chatId }
+                .maxByOrNull { it.timestamp }
+                ?: return@forEach
+
+            val old = dao.getChat(chatId)
+            dao.insertChat(
+                ChatEntity(
+                    chatId,
+                    friend.uid,
+                    friend.name,
+                    friend.profilePicUrl,
+                    if (latest.imageUrl.isNullOrBlank()) latest.content else "Image",
+                    latest.timestamp,
+                    old?.lastSeenTimestamp ?: 0L,
+                    old?.unreadCount ?: 0,
+                    old?.isBlocked ?: false
+                )
+            )
+        }
     }
 
     private suspend fun syncChat(mine: String, chatId: String) {
@@ -458,7 +384,6 @@ class ChatRepository(private val context: Context) : IChatRepository {
             .firstOrNull()
 
         val old = dao.getChat(chatId)
-
         dao.insertChat(
             ChatEntity(
                 chatId,
@@ -474,13 +399,7 @@ class ChatRepository(private val context: Context) : IChatRepository {
         )
     }
 
-    // ---------------------------------------------------------
-    // MESSAGES
-    // ---------------------------------------------------------
-
-    fun setActiveChat(chatId: String?) {
-        activeChatId = chatId
-    }
+    fun setActiveChat(chatId: String?) { activeChatId = chatId }
 
     suspend fun sendMessage(
         chatId: String,
@@ -520,17 +439,11 @@ class ChatRepository(private val context: Context) : IChatRepository {
             .decodeList<MessageRow>()
 
         dao.insertMessages(rows.map(MessageRow::toEntity))
-
         if (activeChatId == chatId) markChatAsRead(chatId)
         syncChat(uid(), chatId)
     }
 
-    // ---------------------------------------------------------
-    // COUNTS / SYNC CONTROL
-    // ---------------------------------------------------------
-
     fun getPendingRequestCount() = dao.getPendingRequestCount()
-
     fun getTotalUnreadCount() = dao.getTotalUnreadCount().map { it ?: 0 }
 
     fun clearAllListeners() {
@@ -547,10 +460,6 @@ class ChatRepository(private val context: Context) : IChatRepository {
         startSync()
     }
 
-    // ---------------------------------------------------------
-    // IMAGE
-    // ---------------------------------------------------------
-
     suspend fun uploadImage(uri: Uri): String {
         val file = com.example.maps123.utils.ImageUtils.uriToFile(context, uri)
         return com.example.maps123.utils.ImageUtils.uploadImage(
@@ -558,43 +467,28 @@ class ChatRepository(private val context: Context) : IChatRepository {
         )
     }
 
-    // ---------------------------------------------------------
-    // READ STATUS
-    // ---------------------------------------------------------
-
     suspend fun markChatAsRead(chatId: String) {
         val now = System.currentTimeMillis()
         if (now - lastReadUpdate < 2_000L) return
         lastReadUpdate = now
 
         val mine = uid()
-
         dao.getUnreadIncomingMessages(chatId, mine).forEach { message ->
-            SupabaseProvider.client
-                .from("messages")
-                .update({ set("read_at", "now()") }) {
-                    filter {
-                        eq("id", message.messageId)
-                        neq("sender_id", mine)
-                    }
+            SupabaseProvider.client.from("messages").update({
+                set("read_at", "now()")
+            }) {
+                filter {
+                    eq("id", message.messageId)
+                    neq("sender_id", mine)
                 }
+            }
             dao.updateMessageReadStatus(message.messageId, true)
         }
-
         dao.markChatAsRead(chatId, now)
     }
 
-    // ---------------------------------------------------------
-    // CHAT ACTIONS
-    // ---------------------------------------------------------
-
     suspend fun clearChat(chatId: String) = dao.clearChatMessages(chatId)
-
     suspend fun deleteChat(chatId: String) = dao.deleteChat(chatId)
-
-    // ---------------------------------------------------------
-    // BLOCKING
-    // ---------------------------------------------------------
 
     suspend fun blockUser(friendUid: String) {
         SupabaseProvider.client.from("blocks").upsert(BlockRow(uid(), friendUid))
@@ -618,10 +512,6 @@ class ChatRepository(private val context: Context) : IChatRepository {
                 eq("blocked_user_id", friendUid)
             }
         }.decodeList<BlockRow>().isNotEmpty()
-
-    // ---------------------------------------------------------
-    // MESSAGE MANAGEMENT
-    // ---------------------------------------------------------
 
     suspend fun deleteMessagesLocally(messageIds: List<String>) =
         dao.deleteMessages(messageIds)
@@ -650,10 +540,6 @@ class ChatRepository(private val context: Context) : IChatRepository {
         dao.updateMessageContent(messageId, newContent.trim())
     }
 
-    // ---------------------------------------------------------
-    // USER
-    // ---------------------------------------------------------
-
     private suspend fun user(id: String): UserEntity? =
         SupabaseProvider.client
             .from("profiles")
@@ -665,10 +551,6 @@ class ChatRepository(private val context: Context) : IChatRepository {
             .firstOrNull()
             ?.toUser()
 }
-
-// =============================================================
-// DATA CLASSES
-// =============================================================
 
 @Serializable
 private data class ChatProfileRow(
