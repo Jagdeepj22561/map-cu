@@ -3,14 +3,12 @@ package com.example.shared.ui
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -44,7 +42,7 @@ fun PureChatScreen(
             }
             if (filteredChats.isEmpty()) {
                 Column(Modifier.fillMaxSize(), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
-                    Surface(Modifier.size(72.dp).clip(CircleShape), color = MaterialTheme.colorScheme.primaryContainer) {
+                    Surface(Modifier.size(72.dp), shape = MaterialTheme.shapes.large, color = MaterialTheme.colorScheme.primaryContainer) {
                         Box(contentAlignment = Alignment.Center) { Icon(Icons.Default.ChatBubbleOutline, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(32.dp)) }
                     }
                     Spacer(Modifier.height(14.dp))
@@ -54,39 +52,14 @@ fun PureChatScreen(
                     FilledTonalButton(onClick = onAddFriendClick) { Icon(Icons.Default.PersonAdd, null); Spacer(Modifier.width(6.dp)); Text("Find people") }
                 }
             } else {
-                LazyColumn(
-                    Modifier.fillMaxSize(),
-                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
-                    verticalArrangement = Arrangement.spacedBy(4.dp)
-                ) {
+                LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp), verticalArrangement = Arrangement.spacedBy(3.dp)) {
                     items(filteredChats, key = { it.chatId }) { chat ->
-                        Card(
-                            onClick = { onChatClick(chat) },
-                            modifier = Modifier.fillMaxWidth(),
-                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-                            shape = MaterialTheme.shapes.medium
-                        ) {
-                            Row(Modifier.fillMaxWidth().padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
-                                renderImage(chat.friendProfilePicUrl, Modifier.size(52.dp).clip(CircleShape), ContentScale.Crop)
-                                Spacer(Modifier.width(12.dp))
-                                Column(Modifier.weight(1f)) {
-                                    Text(chat.friendName, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-                                    Spacer(Modifier.height(3.dp))
-                                    Text(chat.lastMessage.ifBlank { "Start a conversation" }, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
-                                }
-                                if (chat.unreadCount > 0) Badge { Text(if (chat.unreadCount > 99) "99+" else "${chat.unreadCount}") }
-                            }
-                        }
+                        PureChatItem(chat = chat, onClick = { onChatClick(chat) }, onLongClick = { onChatLongClick(chat) }, renderImage = renderImage)
                     }
                 }
             }
         }
-
-        Column(
-            Modifier.align(Alignment.BottomEnd).navigationBarsPadding().padding(end = 18.dp, bottom = 18.dp),
-            horizontalAlignment = Alignment.End,
-            verticalArrangement = Arrangement.spacedBy(10.dp)
-        ) {
+        Column(Modifier.align(Alignment.BottomEnd).navigationBarsPadding().padding(end = 18.dp, bottom = 18.dp), horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(10.dp)) {
             SmallFloatingActionButton(onClick = onNearbyClick) { Icon(Icons.Default.LocationOn, "Nearby") }
             FloatingActionButton(onClick = onNewChatClick) { Icon(Icons.Default.Edit, "New chat") }
         }
