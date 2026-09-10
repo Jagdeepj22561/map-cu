@@ -51,6 +51,19 @@ fun ChatScreen(
     val clipboard = LocalClipboardManager.current
     var requestError by remember { mutableStateOf<String?>(null) }
 
+    // Always refresh existing conversations when the Chat screen enters.
+    // This fixes the case where a chat exists on Supabase but Room has not
+    // populated the list yet, so the user no longer has to press New Chat.
+    LaunchedEffect(chatRepository, selectedTab) {
+        if (selectedTab == 0) {
+            runCatching {
+                chatRepository.refreshUserChatsNow(forceRefresh = true)
+            }.onFailure {
+                // Background sync will retry; don't interrupt the chat UI.
+            }
+        }
+    }
+
     var showNewChatDialog by remember { mutableStateOf(false) }
     var showNearbySheet by remember { mutableStateOf(false) }
     var nearbyUsers by remember { mutableStateOf<List<UserEntity>>(emptyList()) }
