@@ -32,7 +32,7 @@ fun PureHomeScreen(
     hideBars: Boolean = false,
     content: @Composable (PaddingValues) -> Unit
 ) {
-    val primaryScreens = setOf(PureAppScreen.MAP, PureAppScreen.CHAT, PureAppScreen.ANNOUNCEMENTS, PureAppScreen.GROUPS, PureAppScreen.FRIENDS)
+    val primaryScreens = setOf(PureAppScreen.MAP, PureAppScreen.CHAT, PureAppScreen.ANNOUNCEMENTS)
     val showBars = !hideBars && currentScreen in primaryScreens
 
     Scaffold(
@@ -59,8 +59,6 @@ fun PureHomeScreen(
                                         PureAppScreen.MAP -> "Campus map"
                                         PureAppScreen.CHAT -> "Your conversations"
                                         PureAppScreen.ANNOUNCEMENTS -> "Campus community"
-                                        PureAppScreen.GROUPS -> "Student communities"
-                                        PureAppScreen.FRIENDS -> "People you may know"
                                         else -> ""
                                     },
                                     style = MaterialTheme.typography.labelSmall,
@@ -74,14 +72,6 @@ fun PureHomeScreen(
                             IconButton(onClick = { onToggleSearch(false) }) { Icon(Icons.Default.Close, "Close search") }
                         } else {
                             IconButton(onClick = { onToggleSearch(true) }) { Icon(Icons.Default.Search, "Search") }
-                            if (currentScreen != PureAppScreen.GROUPS) {
-                                FilledTonalIconButton(
-                                    onClick = { onScreenSelected(PureAppScreen.GROUPS) },
-                                    modifier = Modifier.size(42.dp)
-                                ) {
-                                    Icon(Icons.Default.Groups, contentDescription = "Groups")
-                                }
-                            }
                             IconButton(onClick = onSettingsClick) { Icon(Icons.Default.Settings, "Settings") }
                         }
                     }
@@ -106,19 +96,13 @@ fun PureHomeScreen(
                             PureDockItem("Map", Icons.Default.Place, currentScreen == PureAppScreen.MAP) { onScreenSelected(PureAppScreen.MAP) }
                             PureDockItem("Chat", Icons.AutoMirrored.Filled.Chat, currentScreen == PureAppScreen.CHAT, unreadMessageCount) { onScreenSelected(PureAppScreen.CHAT) }
                             PureDockItem("News", Icons.Default.Notifications, currentScreen == PureAppScreen.ANNOUNCEMENTS, newAnnouncementCount) { onScreenSelected(PureAppScreen.ANNOUNCEMENTS) }
-                            PureDockItem("Groups", Icons.Default.Groups, currentScreen == PureAppScreen.GROUPS) { onScreenSelected(PureAppScreen.GROUPS) }
-                            PureDockItem("Friends", Icons.Default.PersonSearch, currentScreen == PureAppScreen.FRIENDS) { onScreenSelected(PureAppScreen.FRIENDS) }
                         }
                     }
                 }
             }
         }
     ) { padding ->
-        when (currentScreen) {
-            PureAppScreen.GROUPS -> Box(Modifier.fillMaxSize().padding(padding)) { PureGroupsScreen() }
-            PureAppScreen.FRIENDS -> Box(Modifier.fillMaxSize().padding(padding)) { PureFriendsScreen() }
-            else -> content(padding)
-        }
+        content(padding)
     }
 }
 
@@ -127,14 +111,14 @@ fun PureDockItem(label: String, icon: ImageVector, selected: Boolean, badgeCount
     val color = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
     val container = if (selected) MaterialTheme.colorScheme.primaryContainer else Color.Transparent
     Column(
-        modifier = Modifier.width(64.dp).clickable(onClick = onClick).padding(vertical = 1.dp),
+        modifier = Modifier.width(80.dp).clickable(onClick = onClick).padding(vertical = 1.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(3.dp)
     ) {
-        Surface(shape = RoundedCornerShape(16.dp), color = container, modifier = Modifier.size(width = 52.dp, height = 32.dp)) {
+        Surface(shape = RoundedCornerShape(16.dp), color = container, modifier = Modifier.size(width = 56.dp, height = 34.dp)) {
             Box(contentAlignment = Alignment.Center) {
                 BadgedBox(badge = { if (badgeCount > 0) Badge { Text(if (badgeCount > 99) "99+" else "$badgeCount") } }) {
-                    Icon(icon, contentDescription = label, tint = color, modifier = Modifier.size(21.dp))
+                    Icon(icon, contentDescription = label, tint = color, modifier = Modifier.size(22.dp))
                 }
             }
         }
