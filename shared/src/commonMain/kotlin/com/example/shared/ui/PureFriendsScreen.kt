@@ -31,8 +31,10 @@ fun PureFriendsScreen() {
     fun refresh() = scope.launch {
         loading = true
         error = null
-        runCatching { people = repository.discoverFriends() }
-            .onFailure { error = it.message ?: "Unable to find people." }
+        runCatching {
+            people = repository.discoverFriends()
+            sentIds = repository.getSentFriendRequestReceiverIds()
+        }.onFailure { error = it.message ?: "Unable to find people." }
         loading = false
     }
 
@@ -95,13 +97,24 @@ fun PureFriendsScreen() {
                                     Text(person.reasons.joinToString("  •  "), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
                                 }
                             }
-                            if (person.userId in sentIds) AssistChip(onClick = {}, label = { Text("Sent") })
-                            else FilledTonalButton(onClick = {
-                                scope.launch { runCatching { repository.sendFriendRequest(person.userId); sentIds += person.userId }.onFailure { error = it.message ?: "Unable to send request." } }
-                            }) {
-                                Icon(Icons.Default.PersonAdd, null, Modifier.size(18.dp))
-                                Spacer(Modifier.width(5.dp))
-                                Text("Add")
+                            if (person.userId in sentIds) {
+                                AssistChip(
+                                    onClick = {},
+                                    label = { Text("Request Sent") }
+                                )
+                            } else {
+                                FilledTonalButton(onClick = {
+                                    scope.launch {
+                                        runCatching {
+                                            repository.sendFriendRequest(person.userId)
+                                            sentIds = sentIds + person.userId
+                                        }.onFailure { error = it.message ?: "Unable to send request." }
+                                    }
+                                }) {
+                                    Icon(Icons.Default.PersonAdd, null, Modifier.size(18.dp))
+                                    Spacer(Modifier.width(5.dp))
+                                    Text("Add")
+                                }
                             }
                         }
                     }
