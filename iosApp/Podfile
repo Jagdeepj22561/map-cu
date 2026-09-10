@@ -1,6 +1,5 @@
 source 'https://cdn.cocoapods.org/'
 
-# Keep this in sync with shared/build.gradle.kts.
 platform :ios, '15.0'
 use_frameworks!
 
