@@ -73,8 +73,11 @@ class AnnouncementRepository(context: Context) {
             filter { eq("announcement_id", id) }
         }.decodeList<AnnouncementLikeRow>()
 
+        // Include the author's profile with each comment. The previous query
+        // fetched only author_id, so NestedComment.profile was always null and
+        // the UI had no real account name to display.
         val comments = client.from("announcement_comments").select {
-            Columns.raw("id, author_id, body, created_at")
+            Columns.raw("id, author_id, body, created_at, profiles(name, profile_pic_url)")
             filter { eq("announcement_id", id) }
         }.decodeList<NestedComment>()
 
@@ -176,8 +179,10 @@ class AnnouncementRepository(context: Context) {
                         Columns.raw("announcement_id, user_id")
                     }.decodeList<AnnouncementLikeRow>()
 
+                    // Fetch comment authors together with each comment. The
+                    // profiles relation is defined by announcement_comments.author_id.
                     val allComments = client.from("announcement_comments").select {
-                        Columns.raw("id, announcement_id, author_id, body, created_at")
+                        Columns.raw("id, announcement_id, author_id, body, created_at, profiles(name, profile_pic_url)")
                     }.decodeList<NestedComment>()
 
                     val likesByPost = allLikes.filter { it.announcementId in remoteIds }
@@ -230,9 +235,9 @@ private data class AnnouncementRow(
     @SerialName("event_mode") val eventMode: String? = null,
     @SerialName("event_max_members") val eventMaxMembers: Int? = null,
     @SerialName("event_departments") val eventDepartments: String? = null,
-    @SerialName("event_link") val eventLink: String? = null
-    , @SerialName("announcement_likes") val announcementLikes: List<NestedLike> = emptyList()
-    , @SerialName("announcement_comments") val announcementComments: List<NestedComment> = emptyList()
+    @SerialName("event_link") val eventLink: String? = null,
+    @SerialName("announcement_likes") val announcementLikes: List<NestedLike> = emptyList(),
+    @SerialName("announcement_comments") val announcementComments: List<NestedComment> = emptyList()
 )
 
 private fun Announcement.toRow() = AnnouncementRow(
