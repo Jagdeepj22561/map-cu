@@ -7,5 +7,6 @@ plugins {
     alias(libs.plugins.kotlin.multiplatform) apply false
     alias(libs.plugins.android.kotlin.multiplatform.library) apply false
     alias(libs.plugins.android.lint) apply false
+    alias(libs.plugins.buildkonfig) apply false
     id("org.jetbrains.kotlin.plugin.serialization") version "2.0.21"
 }
