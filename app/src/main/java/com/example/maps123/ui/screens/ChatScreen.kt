@@ -1,4 +1,5 @@
 package com.example.maps123.ui.screens
+
 import android.widget.Toast
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -67,15 +68,12 @@ fun ChatScreen(
         nearbyLoading = true
         nearbyError = null
         try {
-            nearbyUsers = chatRepository.getNearbyUsersImplementation(
-                forceRefresh = forceRefresh
-            )
+            nearbyUsers = chatRepository.getNearbyUsersImplementation(forceRefresh = forceRefresh)
             nearbyLastRefreshedAt = chatRepository.getNearbyUsersLastRefreshTime()
             nearbyRefreshRemainingMs = chatRepository.getNearbyUsersRefreshRemainingMs()
         } catch (e: Exception) {
             if (e.isFirestorePermissionDenied()) {
-                nearbyLimitDialogMessage =
-                    "Nearby users refresh is currently blocked by your Firebase rules. Try again after your server-side limit resets."
+                nearbyLimitDialogMessage = "Nearby users refresh is currently blocked by your server rules. Try again after the server-side limit resets."
                 nearbyError = null
             } else {
                 nearbyError = e.localizedMessage ?: "Failed to load nearby users"
@@ -96,10 +94,7 @@ fun ChatScreen(
     }
 
     val refreshButtonText = remember(nearbyLoading, nearbyLastRefreshedAt, nearbyTimeTicker) {
-        when {
-            nearbyLoading -> "Refreshing..."
-            else -> "Refresh"
-        }
+        if (nearbyLoading) "Refreshing..." else "Refresh"
     }
     val refreshStatusText = remember(nearbyLoading, nearbyLastRefreshedAt, nearbyTimeTicker) {
         when {
@@ -117,19 +112,15 @@ fun ChatScreen(
             onDismiss = { showNewChatDialog = false },
             onFriendClick = { friend ->
                 scope.launch {
-                    runCatching {
-                        chatRepository.createChatForFriend(friend.uid, friend.name)
-                    }.onSuccess { chatId ->
-                        onChatClick(chatId, friend.uid, friend.name, friend.profilePicUrl)
-                        showNewChatDialog = false
-                    }.onFailure { error ->
-                        Toast.makeText(context, error.message ?: "Could not create chat", Toast.LENGTH_SHORT).show()
-                    }
+                    runCatching { chatRepository.createChatForFriend(friend.uid, friend.name) }
+                        .onSuccess { chatId ->
+                            onChatClick(chatId, friend.uid, friend.name, friend.profilePicUrl)
+                            showNewChatDialog = false
+                        }
+                        .onFailure { error -> Toast.makeText(context, error.message ?: "Could not create chat", Toast.LENGTH_SHORT).show() }
                 }
             },
-            renderImage = { url, modifier, scale ->
-                AppAsyncImage(model = url, contentDescription = null, modifier = modifier, contentScale = scale)
-            }
+            renderImage = { url, modifier, scale -> AppAsyncImage(model = url, contentDescription = null, modifier = modifier, contentScale = scale) }
         )
     }
 
@@ -163,31 +154,22 @@ fun ChatScreen(
                 val remaining = chatRepository.getNearbyUsersRefreshRemainingMs()
                 nearbyRefreshRemainingMs = remaining
                 if (remaining > 0L) {
-                    nearbyLimitDialogMessage =
-                        "Nearby users can be refreshed again in ${formatRemainingDuration(remaining)}."
+                    nearbyLimitDialogMessage = "Nearby users can be refreshed again in ${formatRemainingDuration(remaining)}."
                     return@PureNearbyUsersBottomSheet
                 }
-                scope.launch {
-                    loadNearbyUsers(forceRefresh = true)
-                }
+                scope.launch { loadNearbyUsers(forceRefresh = true) }
             },
             refreshButtonText = refreshButtonText,
             refreshStatusText = refreshStatusText,
             isRefreshEnabled = !nearbyLoading,
-            renderImage = { url, modifier, scale ->
-                AppAsyncImage(model = url, contentDescription = null, modifier = modifier, contentScale = scale)
-            }
+            renderImage = { url, modifier, scale -> AppAsyncImage(model = url, contentDescription = null, modifier = modifier, contentScale = scale) }
         )
     }
 
     if (nearbyLimitDialogMessage != null) {
         AlertDialog(
             onDismissRequest = { nearbyLimitDialogMessage = null },
-            confirmButton = {
-                TextButton(onClick = { nearbyLimitDialogMessage = null }) {
-                    Text("OK")
-                }
-            },
+            confirmButton = { TextButton(onClick = { nearbyLimitDialogMessage = null }) { Text("OK") } },
             title = { Text("Nearby Refresh Locked") },
             text = { Text(nearbyLimitDialogMessage.orEmpty()) }
         )
@@ -197,19 +179,13 @@ fun ChatScreen(
         AlertDialog(
             onDismissRequest = { requestError = null },
             confirmButton = {
-                TextButton(
-                    onClick = {
-                        clipboard.setText(AnnotatedString(requestError ?: ""))
-                        Toast.makeText(context, "Error copied", Toast.LENGTH_SHORT).show()
-                        requestError = null
-                    }
-                ) {
-                    Text("Copy")
-                }
+                TextButton(onClick = {
+                    clipboard.setText(AnnotatedString(requestError ?: ""))
+                    Toast.makeText(context, "Error copied", Toast.LENGTH_SHORT).show()
+                    requestError = null
+                }) { Text("Copy") }
             },
-            dismissButton = {
-                TextButton(onClick = { requestError = null }) { Text("Close") }
-            },
+            dismissButton = { TextButton(onClick = { requestError = null }) { Text("Close") } },
             title = { Text("Friend Request Error") },
             text = { Text(requestError ?: "") }
         )
@@ -220,10 +196,7 @@ fun ChatScreen(
     if (showDeleteDialog && chatToDelete != null) {
         PureDeleteChatDialog(
             chatName = chatToDelete?.friendName ?: "this user",
-            onDismiss = {
-                showDeleteDialog = false
-                chatToDelete = null
-            },
+            onDismiss = { showDeleteDialog = false; chatToDelete = null },
             onConfirm = {
                 val target = chatToDelete ?: return@PureDeleteChatDialog
                 showDeleteDialog = false
@@ -242,6 +215,8 @@ fun ChatScreen(
 
     PureChatScreen(
         repository = chatRepository,
+        selectedTab = selectedTab,
+        onTabSelected = onTabSelected,
         onChatClick = { chat ->
             scope.launch {
                 val uid = chatRepository.getCurrentUserUid() ?: return@launch
@@ -252,22 +227,12 @@ fun ChatScreen(
         onAddFriendClick = onAddFriendClick,
         onNearbyClick = {
             showNearbySheet = true
-            if (nearbyUsers.isEmpty() && !nearbyLoading) {
-                scope.launch {
-                    loadNearbyUsers(forceRefresh = false)
-                }
-            }
+            if (nearbyUsers.isEmpty() && !nearbyLoading) scope.launch { loadNearbyUsers(forceRefresh = false) }
         },
         onNewChatClick = { showNewChatDialog = true },
-        onChatLongClick = { chat ->
-            chatToDelete = chat
-            showDeleteDialog = true
-        },
+        onChatLongClick = { chat -> chatToDelete = chat; showDeleteDialog = true },
         searchQuery = searchQuery,
-        renderImage = {
-            url, modifier, scale ->
-            AppAsyncImage(model = url, contentDescription = null, modifier = modifier, contentScale = scale)
-        }
+        renderImage = { url, modifier, scale -> AppAsyncImage(model = url, contentDescription = null, modifier = modifier, contentScale = scale) }
     )
 }
 
