@@ -1,0 +1,69 @@
+name: Build iOS IPA
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: macos-latest
+
+    steps:
+      # 1. Checkout repo
+      - name: Checkout
+        uses: actions/checkout@v3
+
+      # 🔥 FIX: Add Java (VERY IMPORTANT)
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      # 2. Set Xcode
+      - name: Select Xcode
+        run: sudo xcode-select -s /Applications/Xcode.app
+
+      - name: Generate shared pod artifacts
+        run: |
+          ./gradlew :shared:podspec :shared:generateDummyFramework
+
+      - name: Install CocoaPods
+        run: |
+          cd iosApp
+          pod install
+
+      - name: Verify CocoaPods integration
+        run: |
+          test -f iosApp/Podfile.lock
+          grep -n "shared" iosApp/Podfile.lock
+          test -d iosApp/Pods
+
+      # 3. Build iOS
+      - name: Build App
+        run: |
+          cd iosApp
+          xcodebuild \
+            -workspace iosApp.xcworkspace \
+            -scheme iosApp \
+            -configuration Debug \
+            -sdk iphoneos \
+            -archivePath build/App.xcarchive \
+            archive \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO
+
+      # 4. Create IPA
+      - name: Create IPA
+        run: |
+          cd iosApp
+          rm -rf Payload
+          mkdir Payload
+          cp -R build/App.xcarchive/Products/Applications/*.app Payload/
+          zip -r app.ipa Payload
+
+      # 5. Upload
+      - name: Upload IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: app-ipa
+          path: iosApp/app.ipa

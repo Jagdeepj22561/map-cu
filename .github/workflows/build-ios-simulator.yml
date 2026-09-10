@@ -1,0 +1,130 @@
+name: Build iOS Simulator App (.app ZIP)
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: macos-15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+          cache: 'gradle'
+
+      # Keep simulator CI aligned with Kotlin 2.2.21's recommended Xcode line.
+      - name: Select Xcode 26.0.1
+        run: |
+          sudo xcode-select -s /Applications/Xcode_26.0.1.app
+          xcode-select -p
+
+      - name: List available Xcode versions
+        run: ls -la /Applications | grep Xcode
+
+      - name: Cache Kotlin/Native
+        uses: actions/cache@v4
+        with:
+          path: ~/.konan
+          key: ${{ runner.os }}-konan-${{ hashFiles('gradle.properties', 'gradle/libs.versions.toml', 'shared/build.gradle.kts') }}
+          restore-keys: |
+            ${{ runner.os }}-konan-
+
+      - name: Cache CocoaPods
+        uses: actions/cache@v4
+        with:
+          path: |
+            iosApp/Pods
+            ~/Library/Caches/CocoaPods
+          key: ${{ runner.os }}-pods-${{ hashFiles('iosApp/Podfile', 'iosApp/Podfile.lock', 'shared/shared.podspec', 'shared/build.gradle.kts') }}
+          restore-keys: |
+            ${{ runner.os }}-pods-
+
+      - name: Generate shared pod artifacts
+        run: |
+          for attempt in 1 2 3; do
+            ./gradlew :shared:podspec :shared:generateDummyFramework && break
+            if [ "$attempt" -eq 3 ]; then
+              echo "Gradle pod artifact generation failed after 3 attempts"
+              exit 1
+            fi
+            echo "Gradle failed on attempt $attempt, retrying after 20s..."
+            sleep 20
+          done
+
+      - name: Install CocoaPods
+        run: |
+          cd iosApp
+          pod install
+
+      - name: Verify CocoaPods integration
+        run: |
+          test -f iosApp/Podfile.lock
+          grep -n "shared" iosApp/Podfile.lock
+          test -d iosApp/Pods
+
+      - name: Build shared framework for simulator
+        run: |
+          set -o pipefail
+          for attempt in 1 2 3; do
+            ./gradlew :shared:syncFramework \
+              -Pkotlin.native.cocoapods.platform=iphonesimulator \
+              -Pkotlin.native.cocoapods.archs="x86_64 arm64" \
+              -Pkotlin.native.cocoapods.configuration=Debug \
+              --stacktrace 2>&1 | tee shared-sync-framework.log && break
+            if [ "$attempt" -eq 3 ]; then
+              echo "Shared framework build failed. Error summary:"
+              grep -nE "(^e:|^error:|Exception|FAILURE:|Execution failed|Caused by:)" shared-sync-framework.log || true
+              exit 1
+            fi
+            echo "Shared framework build failed on attempt $attempt, retrying after 20s..."
+            sleep 20
+          done
+
+      - name: Verify shared framework product
+        run: |
+          find shared/build/cocoapods/framework -name "shared.framework" -print
+
+      - name: Build for Simulator
+        run: |
+          cd iosApp
+          export OVERRIDE_KOTLIN_BUILD_IDE_SUPPORTED=YES
+          set -o pipefail
+          xcodebuild \
+            -workspace iosApp.xcworkspace \
+            -scheme iosApp \
+            -configuration Debug \
+            -sdk iphonesimulator \
+            -derivedDataPath build 2>&1 | tee ../ios-simulator-xcodebuild.log || {
+              echo "Xcode build failed. Error summary:"
+              grep -nE "(^error:|\\*\\* BUILD FAILED \\*\\*|Command .* failed|no such module)" ../ios-simulator-xcodebuild.log || true
+              exit 1
+            }
+
+      # 5. Find .app
+      - name: Package .app
+        run: |
+          cd iosApp/build/Build/Products/Debug-iphonesimulator
+          ls
+          zip -r iosApp-simulator.zip iosApp.app
+
+      # 6. Upload
+      - name: Upload App Bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-simulator-app
+          path: iosApp/build/Build/Products/Debug-iphonesimulator/iosApp-simulator.zip
+
+      - name: Upload iOS build logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-simulator-build-logs
+          path: |
+            shared-sync-framework.log
+            ios-simulator-xcodebuild.log

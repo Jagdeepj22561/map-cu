@@ -1,0 +1,69 @@
+name: Build Unsigned IPA
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: macos-latest
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v3
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Set Xcode
+        run: sudo xcode-select -s /Applications/Xcode.app
+
+      - name: Generate shared pod artifacts
+        run: |
+          ./gradlew :shared:podspec :shared:generateDummyFramework
+
+      - name: Install CocoaPods
+        run: |
+          cd iosApp
+          pod install
+
+      - name: Verify CocoaPods integration
+        run: |
+          test -f iosApp/Podfile.lock
+          grep -n "shared" iosApp/Podfile.lock
+          test -d iosApp/Pods
+
+      - name: Build for iPhone (no signing)
+        run: |
+          cd iosApp
+          xcodebuild \
+          -workspace iosApp.xcworkspace \
+          -scheme iosApp \
+          -configuration Release \
+          -sdk iphoneos \
+          -archivePath $PWD/build/iosApp.xcarchive \
+          archive \
+          CODE_SIGNING_ALLOWED=NO \
+          CODE_SIGNING_REQUIRED=NO \
+          CODE_SIGN_IDENTITY=""
+
+      - name: Extract .app
+        run: |
+          cd iosApp
+          mkdir Payload
+          cp -r build/iosApp.xcarchive/Products/Applications/*.app Payload/
+
+      - name: Create IPA
+        run: |
+          cd iosApp
+          cd Payload
+          zip -r ../app.ipa .
+          cd ..
+
+      - name: Upload IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: unsigned-ipa
+          path: iosApp/app.ipa

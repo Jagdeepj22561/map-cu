@@ -1,0 +1,144 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isSelf(uid) {
+      return isSignedIn() && request.auth.uid == uid;
+    }
+
+    function nearbyQueryAllowed() {
+      return request.query.limit != null && request.query.limit <= 5;
+    }
+
+    match /users/{uid} {
+      allow get: if isSignedIn();
+      allow list: if isSignedIn() && nearbyQueryAllowed();
+      allow write: if isSelf(uid);
+
+      match /groups/{groupId} {
+        allow read: if isSelf(uid);
+        allow write: if isSignedIn() &&
+          (
+            isSelf(uid) ||
+            get(/databases/$(database)/documents/groups/$(groupId)).data.ownerUid == request.auth.uid
+          );
+      }
+
+      match /blocks/{friendUid} {
+        allow read, write: if isSelf(uid);
+      }
+    }
+
+    match /friend_requests/{targetUid}/requests/{senderUid} {
+      allow read, write: if isSignedIn() &&
+        (request.auth.uid == senderUid || request.auth.uid == targetUid);
+
+      allow create: if isSignedIn() &&
+        request.auth.uid == senderUid &&
+        request.resource.data.keys().hasAll(
+          ['senderUid', 'senderName', 'senderEmail', 'status', 'timestamp']
+        ) &&
+        request.resource.data.senderUid == request.auth.uid &&
+        request.resource.data.status == "PENDING";
+    }
+
+    match /friends/{uid}/list/{friendUid} {
+      allow read: if isSignedIn();
+
+      allow write: if isSignedIn() &&
+        (
+          request.auth.uid == uid ||
+          exists(/databases/$(database)/documents/friend_requests/$(request.auth.uid)/requests/$(uid)) ||
+          (resource != null &&
+           exists(/databases/$(database)/documents/friends/$(request.auth.uid)/list/$(uid)))
+        );
+    }
+
+    match /user_chats/{uid}/chats/{chatId} {
+      allow read: if isSelf(uid);
+      allow write: if isSignedIn() &&
+        (
+          request.auth.uid == uid ||
+          exists(/databases/$(database)/documents/friends/$(uid)/list/$(request.auth.uid))
+        );
+    }
+
+    match /messages/{chatId} {
+      allow read, write: if isSignedIn() &&
+        chatId.matches('.*' + request.auth.uid + '.*');
+    }
+
+    match /messages/{chatId}/msgs/{messageId} {
+      allow read, write: if isSignedIn() &&
+        chatId.matches('.*' + request.auth.uid + '.*');
+    }
+
+    match /groups/{groupId} {
+      allow read: if isSignedIn() &&
+        (
+          resource.data.ownerUid == request.auth.uid ||
+          resource.data.members[request.auth.uid] != null ||
+          resource.data.visibility == "PUBLIC" ||
+          resource.data.publicGroupId is string ||
+          resource.data.inviteCode is string
+        );
+
+      allow write: if isSignedIn() &&
+        (
+          !exists(/databases/$(database)/documents/groups/$(groupId)) ||
+          resource.data.ownerUid == request.auth.uid ||
+          resource.data.members[request.auth.uid] != null ||
+          request.resource.data.members[request.auth.uid] != null
+        );
+    }
+
+    match /group_messages/{groupId}/msgs/{messageId} {
+      allow read, write: if isSignedIn() &&
+        get(/databases/$(database)/documents/groups/$(groupId)).data.members[request.auth.uid] != null;
+    }
+
+    match /announcements/{announcementId} {
+      allow read: if isSignedIn();
+
+      // This is the base author-only create rule.
+      // If you want per-user posting limits here, extend this condition with
+      // a quota document or backend-managed field that rules can read.
+      // A rolling "1 post per 24h" cannot be enforced reliably in rules alone
+      // with the current announcement-only document model.
+      allow create: if isSignedIn() &&
+        request.resource.data.authorUid == request.auth.uid;
+
+      allow update, delete: if isSignedIn() &&
+        resource.data.authorUid == request.auth.uid;
+
+      match /likes/{uid} {
+        allow read: if isSignedIn();
+        allow write: if isSignedIn() && request.auth.uid == uid;
+      }
+
+      match /comments/{commentId} {
+        allow read: if isSignedIn();
+
+        allow create: if isSignedIn() &&
+          request.resource.data.authorUid == request.auth.uid;
+
+        allow update, delete: if isSignedIn() &&
+          resource.data.authorUid == request.auth.uid;
+      }
+    }
+
+    match /reports/{reportId} {
+      allow write: if isSignedIn();
+    }
+
+    match /notifications/{notificationId} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn();
+      allow update, delete: if false;
+    }
+  }
+}
