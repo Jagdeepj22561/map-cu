@@ -54,7 +54,16 @@ class TeamRepository {
     suspend fun sendFriendRequest(receiverId: String) {
         val uid = client.auth.currentUserOrNull()?.id ?: error("Login required")
         require(uid != receiverId)
-        client.from("friend_requests").insert(FriendRequestInsert(uid, receiverId))
+
+        // Friend requests are idempotent: the database has a unique
+        // (sender_id, receiver_id) constraint, so retrying an already-sent
+        // request must not surface a duplicate-key error to the user.
+        client.from("friend_requests").upsert(
+            FriendRequestInsert(uid, receiverId)
+        ) {
+            onConflict = "sender_id,receiver_id"
+            ignoreDuplicates = true
+        }
     }
 
     suspend fun discoverFriends(limit: Int = 30): List<FriendSuggestion> =
