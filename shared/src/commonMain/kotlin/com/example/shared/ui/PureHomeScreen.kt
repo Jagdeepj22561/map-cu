@@ -16,7 +16,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.unit.dp
 
-enum class PureAppScreen { MAP, CHAT, ANNOUNCEMENTS, SETTINGS, PROFILE, FRIEND_PROFILE, ANNOUNCEMENT_DETAIL }
+enum class PureAppScreen { MAP, CHAT, ANNOUNCEMENTS, GROUPS, SETTINGS, PROFILE, FRIEND_PROFILE, ANNOUNCEMENT_DETAIL }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -34,7 +34,7 @@ fun PureHomeScreen(
     content: @Composable (PaddingValues) -> Unit
 ) {
     val showTopBar = !hideBars && currentScreen in listOf(PureAppScreen.MAP, PureAppScreen.CHAT, PureAppScreen.ANNOUNCEMENTS)
-    val showBottomBar = !hideBars && currentScreen in listOf(PureAppScreen.MAP, PureAppScreen.CHAT, PureAppScreen.ANNOUNCEMENTS)
+    val showBottomBar = !hideBars && currentScreen in listOf(PureAppScreen.MAP, PureAppScreen.CHAT, PureAppScreen.ANNOUNCEMENTS, PureAppScreen.GROUPS)
 
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,
@@ -97,18 +97,14 @@ fun PureHomeScreen(
         bottomBar = {
             if (showBottomBar) {
                 Surface(
-                    color = if (currentScreen == PureAppScreen.MAP) {
-                        Color.Transparent
-                    } else {
-                        MaterialTheme.colorScheme.background
-                    },
+                    color = if (currentScreen == PureAppScreen.MAP) Color.Transparent else MaterialTheme.colorScheme.background,
                     tonalElevation = 0.dp,
                     shadowElevation = 0.dp
                 ) {
                     Box(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(start = 54.dp, end = 54.dp, bottom = 18.dp),
+                            .padding(start = 32.dp, end = 32.dp, bottom = 18.dp),
                         contentAlignment = Alignment.BottomCenter
                     ) {
                         Surface(
@@ -126,34 +122,31 @@ fun PureHomeScreen(
                                 horizontalArrangement = Arrangement.SpaceEvenly,
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
-                                PureDockItem(
-                                    label = "Map",
-                                    icon = Icons.Default.Place,
-                                    selected = currentScreen == PureAppScreen.MAP,
-                                    onClick = { onScreenSelected(PureAppScreen.MAP) }
-                                )
-                                PureDockItem(
-                                    label = "Chat",
-                                    icon = Icons.AutoMirrored.Filled.Chat,
-                                    selected = currentScreen == PureAppScreen.CHAT,
-                                    badgeCount = unreadMessageCount,
-                                    onClick = { onScreenSelected(PureAppScreen.CHAT) }
-                                )
-                                PureDockItem(
-                                    label = "News",
-                                    icon = Icons.Default.Notifications,
-                                    selected = currentScreen == PureAppScreen.ANNOUNCEMENTS,
-                                    badgeCount = newAnnouncementCount,
-                                    onClick = { onScreenSelected(PureAppScreen.ANNOUNCEMENTS) }
-                                )
+                                PureDockItem("Map", Icons.Default.Place, currentScreen == PureAppScreen.MAP) {
+                                    onScreenSelected(PureAppScreen.MAP)
+                                }
+                                PureDockItem("Chat", Icons.AutoMirrored.Filled.Chat, currentScreen == PureAppScreen.CHAT, unreadMessageCount) {
+                                    onScreenSelected(PureAppScreen.CHAT)
+                                }
+                                PureDockItem("News", Icons.Default.Notifications, currentScreen == PureAppScreen.ANNOUNCEMENTS, newAnnouncementCount) {
+                                    onScreenSelected(PureAppScreen.ANNOUNCEMENTS)
+                                }
+                                PureDockItem("Groups", Icons.Default.Groups, currentScreen == PureAppScreen.GROUPS) {
+                                    onScreenSelected(PureAppScreen.GROUPS)
+                                }
                             }
                         }
                     }
                 }
             }
-        },
-        content = content
-    )
+        }
+    ) { padding ->
+        if (currentScreen == PureAppScreen.GROUPS) {
+            PureGroupsScreen()
+        } else {
+            content(padding)
+        }
+    }
 }
 
 @Composable
@@ -181,9 +174,7 @@ fun PureDockItem(
             Box(contentAlignment = Alignment.Center) {
                 BadgedBox(
                     badge = {
-                        if (badgeCount > 0) {
-                            Badge { Text("$badgeCount") }
-                        }
+                        if (badgeCount > 0) Badge { Text("$badgeCount") }
                     }
                 ) {
                     Icon(icon, contentDescription = label, tint = color)
