@@ -47,7 +47,7 @@ fun PureChatScreen(
             FilterChip(
                 selected = selectedTab == 1,
                 onClick = { onTabSelected(1) },
-                label = { Text("Groups") },
+                label = { Text("Community") },
                 leadingIcon = { Icon(Icons.Default.Groups, null, modifier = Modifier.size(18.dp)) }
             )
         }
