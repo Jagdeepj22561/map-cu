@@ -37,6 +37,7 @@ import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.unit.dp
 import com.example.maps123.ui.components.AppAsyncImage
+import com.example.maps123.ui.components.InstagramCommentsSheet
 import com.example.maps123.data.repository.AnnouncementRepository
 import com.example.maps123.data.repository.ChatRepository
 import com.example.maps123.data.repository.UserRepository
@@ -70,7 +71,8 @@ fun AnnouncementsScreen(
     onTabSelected: (Int) -> Unit,
     onSettingsClick: () -> Unit,
     onAddFriendClick: () -> Unit,
-    onAnnouncementClick: (String) -> Unit
+    onAnnouncementClick: (String) -> Unit,
+    onOpenTeamsClick: ((String) -> Unit)? = null
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -104,7 +106,7 @@ fun AnnouncementsScreen(
 
     LaunchedEffect(currentUid) {
         if (!currentUid.isNullOrBlank()) {
-            userRepository.loadUser(currentUid)
+            userRepository.syncUser(currentUid)
         }
     }
 
@@ -143,6 +145,10 @@ fun AnnouncementsScreen(
         }
         scope.launch {
             try {
+                if (!chatRepository.isFriend(authorUid)) {
+                    Toast.makeText(context, "Add this user as a friend first to message them", Toast.LENGTH_SHORT).show()
+                    return@launch
+                }
                 chatRepository.createChatForFriend(authorUid, announcement.author.ifBlank { "User" })
                 Toast.makeText(context, "Private chat added in Chats", Toast.LENGTH_SHORT).show()
             } catch (e: Exception) {
@@ -160,9 +166,10 @@ fun AnnouncementsScreen(
         selectedTab = selectedTab,
         onTabSelected = onTabSelected,
         announcements = filteredAnnouncements,
-        isLoading = isLoading,
+        isLoading = isLoading && announcements.isEmpty(),
         currentUser = currentUser?.toPureUser(),
         onAnnouncementClick = onAnnouncementClick,
+        onOpenTeamsClick = onOpenTeamsClick,
         onCreatePostClick = {
             if (currentUid.isNullOrBlank()) {
                 Toast.makeText(context, "Login required to create a post", Toast.LENGTH_SHORT).show()
@@ -203,7 +210,6 @@ fun AnnouncementsScreen(
             val wasSaved = savedPosts.getBoolean(announcement.id, false)
             savedPosts.edit().putBoolean(announcement.id, !wasSaved).apply()
             savedIds = if (wasSaved) savedIds - announcement.id else savedIds + announcement.id
-            Toast.makeText(context, if (wasSaved) "Removed from saved posts" else "Post saved", Toast.LENGTH_SHORT).show()
         },
         formatTime = { timestamp ->
             SimpleDateFormat("MMM dd, hh:mm a", Locale.getDefault()).format(Date(timestamp))
@@ -228,7 +234,7 @@ fun AnnouncementsScreen(
             initialType = AnnouncementType.values().getOrElse(selectedTab) { AnnouncementType.NEWS },
             onDismiss = { showCreateDialog = false },
             isLoading = isPosting,
-            onPost = { title, content, type, itemName, place, time, reward, eventVenue, eventTime, eventPurpose, eventDlType, eventMode, eventMaxMembers, eventDepartments, eventLink ->
+            onPost = { title, content, type, itemName, place, time, reward, eventVenue, eventTime, eventPurpose, eventDlType, eventMode, eventMaxMembers, eventDepartments, eventLink, eventCategory ->
                 isPosting = true
                 scope.launch {
                     try {
@@ -268,7 +274,8 @@ fun AnnouncementsScreen(
                             eventMode = eventMode,
                             eventMaxMembers = eventMaxMembers,
                             eventDepartments = eventDepartments,
-                            eventLink = eventLink
+                            eventLink = eventLink,
+                            eventCategory = eventCategory
                         )
 
                         repository.createAnnouncement(announcement)
@@ -301,7 +308,9 @@ fun AnnouncementsScreen(
 
     if (commentPost != null) {
         var commentText by remember(commentPost?.id) { mutableStateOf("") }
+        var replyingToComment by remember(commentPost?.id) { mutableStateOf<Comment?>(null) }
         val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+        val clipboard = LocalClipboardManager.current
         ModalBottomSheet(
             onDismissRequest = { commentPost = null },
             sheetState = sheetState,
@@ -309,10 +318,60 @@ fun AnnouncementsScreen(
         ) {
             InstagramCommentsSheet(
                 comments = commentPost?.comments?.values?.sortedBy { it.timestamp }.orEmpty(),
+                currentUid = currentUid,
                 currentUserName = currentUser?.name.orEmpty(),
                 currentUserPhoto = currentUser?.profilePicUrl,
                 commentText = commentText,
                 onCommentTextChange = { commentText = it },
+                replyingToComment = replyingToComment,
+                onCancelReply = { replyingToComment = null },
+                onReply = { commentToReply ->
+                    replyingToComment = commentToReply
+                    val mention = "@${commentToReply.userName.ifBlank { "User" }} "
+                    if (!commentText.startsWith(mention)) {
+                        commentText = mention + commentText.replace(Regex("^@[^\\s]+\\s+"), "")
+                    }
+                },
+                onDeleteComment = { commentToDelete ->
+                    val post = commentPost ?: return@InstagramCommentsSheet
+                    // Optimistic update
+                    commentPost = post.copy(comments = post.comments - commentToDelete.id)
+                    localCommentCounts = localCommentCounts + (post.id to (post.comments.size - 1).coerceAtLeast(0))
+                    scope.launch {
+                        runCatching { repository.deleteComment(post.id, commentToDelete.id) }
+                            .onSuccess {
+                                localCommentCounts = localCommentCounts - post.id
+                                Toast.makeText(context, "Comment deleted", Toast.LENGTH_SHORT).show()
+                            }
+                            .onFailure {
+                                commentPost = post
+                                localCommentCounts = localCommentCounts - post.id
+                                Toast.makeText(context, "Could not delete comment: ${it.message}", Toast.LENGTH_SHORT).show()
+                            }
+                    }
+                },
+                onReportComment = { commentToReport ->
+                    val post = commentPost ?: return@InstagramCommentsSheet
+                    if (currentUid != null) {
+                        scope.launch {
+                            runCatching {
+                                repository.reportAnnouncement(
+                                    announcementId = post.id,
+                                    reporterUid = currentUid,
+                                    reason = "Reported comment: ${commentToReport.text.take(100)}"
+                                )
+                            }.onSuccess {
+                                Toast.makeText(context, "Comment reported", Toast.LENGTH_SHORT).show()
+                            }.onFailure {
+                                Toast.makeText(context, "Could not report: ${it.message}", Toast.LENGTH_SHORT).show()
+                            }
+                        }
+                    }
+                },
+                onCopyComment = { commentToCopy ->
+                    clipboard.setText(AnnotatedString(commentToCopy.text))
+                    Toast.makeText(context, "Comment copied", Toast.LENGTH_SHORT).show()
+                },
                 onPost = {
                     val post = commentPost ?: return@InstagramCommentsSheet
                     val body = commentText.trim()
@@ -320,7 +379,7 @@ fun AnnouncementsScreen(
                     val localComment = Comment(
                         id = "local-${System.currentTimeMillis()}",
                         userId = currentUid.orEmpty(),
-                        userName = currentUser?.name.orEmpty(),
+                        userName = currentUser?.name.orEmpty().ifBlank { "User" },
                         userProfilePic = currentUser?.profilePicUrl,
                         text = body,
                         timestamp = System.currentTimeMillis()
@@ -329,6 +388,7 @@ fun AnnouncementsScreen(
                     commentPost = post.copy(comments = post.comments + (localComment.id to localComment))
                     localCommentCounts = localCommentCounts + (post.id to (post.comments.size + 1))
                     commentText = ""
+                    replyingToComment = null
                     scope.launch {
                         runCatching { repository.addComment(post.id, body, localComment) }
                             .onSuccess {
@@ -440,139 +500,5 @@ fun AnnouncementsScreen(
                 AppAsyncImage(model = url, contentDescription = null, modifier = modifier, contentScale = scale)
             }
         )
-    }
-}
-
-/** Instagram-style full comment conversation, backed by the existing Supabase flow. */
-@Composable
-private fun InstagramCommentsSheet(
-    comments: List<Comment>,
-    currentUserName: String,
-    currentUserPhoto: String?,
-    commentText: String,
-    onCommentTextChange: (String) -> Unit,
-    onPost: () -> Unit,
-    renderAvatar: @Composable (String?, Modifier) -> Unit
-) {
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .heightIn(min = 360.dp, max = 680.dp)
-            .navigationBarsPadding()
-    ) {
-        Box(
-            modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
-            contentAlignment = Alignment.Center
-        ) {
-            Text("Comments", style = MaterialTheme.typography.titleMedium, fontWeight = androidx.compose.ui.text.font.FontWeight.Bold)
-        }
-        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = .55f))
-
-        if (comments.isEmpty()) {
-            Box(Modifier.fillMaxWidth().weight(1f), contentAlignment = Alignment.Center) {
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Icon(Icons.Outlined.FavoriteBorder, null, modifier = Modifier.size(34.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
-                    Spacer(Modifier.height(10.dp))
-                    Text("No comments yet", fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold)
-                    Text("Start the conversation.", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
-                }
-            }
-        } else {
-            LazyColumn(
-                modifier = Modifier.weight(1f),
-                contentPadding = PaddingValues(horizontal = 16.dp, vertical = 14.dp),
-                verticalArrangement = Arrangement.spacedBy(18.dp)
-            ) {
-                items(comments, key = { it.id }) { comment ->
-                    InstagramCommentRow(comment, renderAvatar)
-                }
-            }
-        }
-
-        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = .55f))
-        Row(
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            renderAvatar(
-                currentUserPhoto,
-                Modifier.size(36.dp).clip(CircleShape).background(MaterialTheme.colorScheme.surfaceVariant)
-            )
-            Spacer(Modifier.width(10.dp))
-            Surface(
-                modifier = Modifier.weight(1f),
-                shape = RoundedCornerShape(22.dp),
-                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = .58f)
-            ) {
-                TextField(
-                    value = commentText,
-                    onValueChange = onCommentTextChange,
-                    placeholder = { Text("Add a comment…") },
-                    modifier = Modifier.fillMaxWidth(),
-                    singleLine = true,
-                    colors = TextFieldDefaults.colors(
-                        focusedContainerColor = Color.Transparent,
-                        unfocusedContainerColor = Color.Transparent,
-                        focusedIndicatorColor = Color.Transparent,
-                        unfocusedIndicatorColor = Color.Transparent
-                    )
-                )
-            }
-            if (commentText.trim().isNotEmpty()) {
-                IconButton(onClick = onPost) {
-                    Icon(Icons.AutoMirrored.Filled.Send, "Post comment", tint = MaterialTheme.colorScheme.primary)
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun InstagramCommentRow(
-    comment: Comment,
-    renderAvatar: @Composable (String?, Modifier) -> Unit
-) {
-    Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.Top) {
-        renderAvatar(
-            comment.userProfilePic,
-            Modifier.size(38.dp).clip(CircleShape).background(MaterialTheme.colorScheme.surfaceVariant)
-        )
-        Spacer(Modifier.width(10.dp))
-        Column(modifier = Modifier.weight(1f)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(
-                    text = comment.userName.ifBlank { "Campus member" },
-                    fontWeight = androidx.compose.ui.text.font.FontWeight.Bold,
-                    style = MaterialTheme.typography.bodySmall
-                )
-                Spacer(Modifier.width(8.dp))
-                Text(
-                    text = commentRelativeTime(comment.timestamp),
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
-            Spacer(Modifier.height(2.dp))
-            Text(comment.text, style = MaterialTheme.typography.bodyMedium)
-            Text(
-                "Reply",
-                modifier = Modifier.padding(top = 5.dp),
-                style = MaterialTheme.typography.labelSmall,
-                fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-        }
-        Icon(Icons.Outlined.MoreHoriz, "Comment options", tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(18.dp))
-    }
-}
-
-private fun commentRelativeTime(timestamp: Long): String {
-    if (timestamp <= 0) return "now"
-    val minutes = ((System.currentTimeMillis() - timestamp).coerceAtLeast(0) / 60_000)
-    return when {
-        minutes < 1 -> "now"
-        minutes < 60 -> "${minutes}m"
-        minutes < 1_440 -> "${minutes / 60}h"
-        else -> "${minutes / 1_440}d"
     }
 }

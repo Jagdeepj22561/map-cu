@@ -73,6 +73,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 chatRepository.startSync()
                 refreshFriends(forceRefresh = false)
 
+                runCatching { chatRepository.refreshUserChatsNow(forceRefresh = true) }
+                    .onFailure { Log.w("MainViewModel", "Initial chat refresh failed", it) }
+
                 launch {
                     chatRepository.getTotalUnreadCount().collect { count ->
                         _uiState.update { it.copy(unreadMessageCount = count) }
@@ -168,6 +171,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun onLocationUpdate(lat: Double, lng: Double) {
         val loc = LatLng(lat, lng)
         _uiState.update { it.copy(userLocation = loc) }
+
+        val uid = AuthRepository.currentUserId()
+        if (!uid.isNullOrBlank()) {
+            viewModelScope.launch {
+                userRepository.updateUserLocation(uid, lat, lng)
+            }
+        }
 
         val state = _uiState.value
         if (state.isNavigating && state.activeRoute != null) {

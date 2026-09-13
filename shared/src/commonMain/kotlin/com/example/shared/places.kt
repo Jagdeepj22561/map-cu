@@ -1,12 +1,17 @@
 package com.example.shared
 
-enum class PlaceCategory {
-    BLOCK,
-    GATE,
-    PARK,
-    HOSTEL,
-    BANK,
-    OTHER
+enum class PlaceCategory(val displayLabel: String) {
+    BLOCK("Blocks"),
+    GATE("Gates"),
+    PARK("Parks"),
+    HOSTEL("Hostels"),
+    BANK("Bank"),
+    ATM("ATM"),
+    CAFETERIA("Cafeteria / Food"),
+    PARKING("Parking"),
+    LIBRARY("Library"),
+    LAB("Labs"),
+    OTHER("Other")
 }
 
 data class Place(
@@ -43,6 +48,6 @@ val campusPlaces = listOf(
     Place("park cu", 30.76794139804214, 76.57580369304374, PlaceCategory.PARK),
     Place("cu front garden", 30.772230274856696, 76.57774479174435, PlaceCategory.PARK),
     Place("j and k bank", 30.766541950899168, 76.5748079884156, PlaceCategory.BANK),
-    Place("sbi atm", 30.767695983967048, 76.57529723744993, PlaceCategory.BANK),
+    Place("sbi atm", 30.767695983967048, 76.57529723744993, PlaceCategory.ATM),
     Place("tagore girls hostel", 30.76579249851006, 76.57578490280444, PlaceCategory.HOSTEL)
 )

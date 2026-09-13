@@ -13,5 +13,11 @@ data class PureUser(
     val dob: String = "",
     val profilePicUrl: String = "",
     val lastUpdated: Long = 0L,
-    val location: GeoPoint? = null
+    val location: GeoPoint? = null,
+    val university: String = "",
+    val instagramLink: String = "",
+    val snapchatLink: String = "",
+    val linkedinLink: String = "",
+    val distanceMeters: Double? = null,
+    val ghostMode: Boolean = false
 )

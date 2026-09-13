@@ -20,6 +20,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -148,13 +149,13 @@ fun PureProfileScreen(
             Box(
                 Modifier
                     .fillMaxWidth()
-                    .height(190.dp)
+                    .height(132.dp)
             ) {
 
                 Box(
                     Modifier
                         .fillMaxWidth()
-                        .height(125.dp)
+                        .height(88.dp)
                         .background(
                             Brush.horizontalGradient(
                                 listOf(
@@ -169,7 +170,7 @@ fun PureProfileScreen(
 
                 Box(
                     Modifier
-                        .size(130.dp)
+                        .size(96.dp)
                         .align(Alignment.BottomCenter)
                 ) {
 
@@ -185,7 +186,7 @@ fun PureProfileScreen(
                         Icon(
                             Icons.Default.Person,
                             null,
-                            modifier = Modifier.size(72.dp),
+                            modifier = Modifier.size(52.dp),
                             tint = MaterialTheme.colorScheme.primary
                         )
                     }
@@ -195,7 +196,7 @@ fun PureProfileScreen(
                         .clip(CircleShape)
                         .background(MaterialTheme.colorScheme.surface)
                         .border(
-                            4.dp,
+                            3.dp,
                             MaterialTheme.colorScheme.surface,
                             CircleShape
                         )
@@ -209,7 +210,7 @@ fun PureProfileScreen(
                         Surface(
                             modifier = Modifier
                                 .align(Alignment.BottomEnd)
-                                .size(32.dp)
+                                .size(26.dp)
                                 .clickable {
                                     onImageClick()
                                 },
@@ -220,7 +221,7 @@ fun PureProfileScreen(
                             Icon(
                                 Icons.Default.CameraAlt,
                                 "Change profile photo",
-                                Modifier.padding(7.dp)
+                                Modifier.padding(5.dp)
                             )
                         }
                     }
@@ -249,13 +250,17 @@ fun PureProfileScreen(
                 Text(
                     name,
                     style = MaterialTheme.typography.headlineSmall,
-                    fontWeight = FontWeight.Bold
+                    fontWeight = FontWeight.Bold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
                 )
 
                 Text(
                     email,
                     style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
                 )
             }
 
@@ -729,7 +734,8 @@ fun ProfileInfoRow(
 
             Text(
                 text = label,
-                style = MaterialTheme.typography.labelSmall,
+                style = MaterialTheme.typography.bodySmall,
+                fontWeight = FontWeight.SemiBold,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
 
@@ -752,8 +758,7 @@ fun ProfileInfoRow(
                     text = value.ifBlank {
                         "Not set"
                     },
-                    style = MaterialTheme.typography.bodyLarge,
-                    fontWeight = FontWeight.Medium
+                    style = MaterialTheme.typography.bodyMedium
                 )
             }
         }
@@ -795,7 +800,8 @@ fun SocialLinkRow(
 
             Text(
                 text = label,
-                style = MaterialTheme.typography.labelSmall,
+                style = MaterialTheme.typography.bodySmall,
+                fontWeight = FontWeight.SemiBold,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
 
@@ -823,13 +829,14 @@ fun SocialLinkRow(
                         "Connected"
                     },
                     style = MaterialTheme.typography.bodyMedium,
-                    fontWeight = FontWeight.Medium,
                     color =
                         if (link.isBlank()) {
                             MaterialTheme.colorScheme.onSurfaceVariant
                         } else {
                             MaterialTheme.colorScheme.primary
                         },
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.clickable(
                         enabled = link.isNotBlank()
                     ) {

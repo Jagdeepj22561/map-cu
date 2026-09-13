@@ -22,7 +22,9 @@ import com.example.maps123.data.repository.ChatRepository
 import com.example.maps123.ui.components.AppAsyncImage
 import com.example.maps123.utils.DateUtils
 import com.example.maps123.utils.PostLinks
+import com.example.maps123.utils.toPureUser
 import com.example.shared.model.Announcement
+import com.example.shared.model.AnnouncementType
 import com.example.shared.model.Comment
 import com.example.shared.ui.PureAnnouncementDetailScreen
 import com.example.shared.ui.PureReportDialog
@@ -35,6 +37,7 @@ fun AnnouncementDetailScreen(
     announcementId: String,
     repo: AnnouncementRepository,
     chatRepository: ChatRepository,
+    initialTab: Int = 0,
     onBack: () -> Unit
 ) {
     val context = LocalContext.current
@@ -82,6 +85,10 @@ fun AnnouncementDetailScreen(
         }
         scope.launch {
             try {
+                if (!chatRepository.isFriend(authorUid)) {
+                    Toast.makeText(context, "Add this user as a friend first to message them", Toast.LENGTH_SHORT).show()
+                    return@launch
+                }
                 chatRepository.createChatForFriend(authorUid, announcement.author.ifBlank { "User" })
                 Toast.makeText(context, "Private chat added in Chats", Toast.LENGTH_SHORT).show()
             } catch (e: Exception) {
@@ -90,62 +97,98 @@ fun AnnouncementDetailScreen(
         }
     }
 
-    PureAnnouncementDetailScreen(
-        announcement = post,
-        isLoading = loading && post == null,
-        errorMessage = errorMessage,
-        currentUid = currentUid,
-        onBack = onBack,
-        onShareClick = { showShareDialog = true },
-        onCopyIdClick = {
-            post?.id?.let { id ->
-                clipboard.setText(AnnotatedString(id))
-                Toast.makeText(context, "Post ID copied", Toast.LENGTH_SHORT).show()
-            }
-        },
-        onContactAuthor = { announcement -> contactAuthorPrivately(announcement) },
-        onReport = { showReportDialog = true },
-        onDelete = { showDeleteConfirm = true },
-        onLike = {
-            val current = post ?: return@PureAnnouncementDetailScreen
-            val uid = currentUid ?: run {
-                Toast.makeText(context, "Login required", Toast.LENGTH_SHORT).show()
-                return@PureAnnouncementDetailScreen
-            }
-            val wasLiked = current.likes.containsKey(uid)
-            val shouldLike = !wasLiked
-            post = current.copy(
-                likes = current.likes.toMutableMap().apply {
-                    if (shouldLike) put(uid, true) else remove(uid)
+    var friends by remember { mutableStateOf<List<com.example.shared.model.PureUser>>(emptyList()) }
+    LaunchedEffect(Unit) {
+        friends = runCatching { chatRepository.getFriendsImplementation() }
+            .getOrDefault(emptyList())
+            .map { it.toPureUser() }
+    }
+
+    if (post != null && post!!.type == AnnouncementType.EVENT) {
+        com.example.shared.ui.PureEventDetailScreen(
+            announcement = post!!,
+            currentUid = currentUid,
+            friends = friends,
+            initialTab = initialTab,
+            onBack = onBack,
+            onShareClick = { showShareDialog = true },
+            onCopyIdClick = {
+                post?.id?.let { id ->
+                    clipboard.setText(AnnotatedString(id))
+                    Toast.makeText(context, "Post ID copied", Toast.LENGTH_SHORT).show()
                 }
-            )
-            scope.launch {
-                runCatching { repo.setLike(current.id, shouldLike) }
-                    .onFailure {
-                        post = current
-                        Toast.makeText(context, it.message ?: "Could not update like", Toast.LENGTH_SHORT).show()
+            },
+            onContactOrganizer = { post?.let { contactAuthorPrivately(it) } },
+            onOpenChatWithUser = { friendUid, friendName ->
+                scope.launch {
+                    runCatching {
+                        chatRepository.createChatForFriend(friendUid, friendName)
+                        Toast.makeText(context, "Private chat opened with $friendName", Toast.LENGTH_SHORT).show()
                     }
+                }
+            },
+            formatTime = { timestamp -> DateUtils.getRelativeTime(timestamp) },
+            renderImage = { url, modifier, scale ->
+                AppAsyncImage(model = url, contentDescription = null, modifier = modifier, contentScale = scale)
             }
-        },
-        onComment = { showCommentDialog = true },
-        onSave = {
-            val id = post?.id ?: return@PureAnnouncementDetailScreen
-            saved = !saved
-            context.getSharedPreferences("saved_announcements", 0)
-                .edit()
-                .putBoolean(id, saved)
-                .apply()
-            Toast.makeText(context, if (saved) "Post saved" else "Removed from saved posts", Toast.LENGTH_SHORT).show()
-        },
-        isLikedByCurrentUser = post?.likes?.containsKey(currentUid) == true,
-        isSaved = saved,
-        likeCount = post?.likes?.size ?: 0,
-        commentCount = post?.comments?.size ?: 0,
-        formatTime = { timestamp -> DateUtils.getRelativeTime(timestamp) },
-        renderImage = { url, modifier, scale ->
-            AppAsyncImage(model = url, contentDescription = null, modifier = modifier, contentScale = scale)
-        }
-    )
+        )
+    } else {
+        PureAnnouncementDetailScreen(
+            announcement = post,
+            isLoading = loading && post == null,
+            errorMessage = errorMessage,
+            currentUid = currentUid,
+            onBack = onBack,
+            onShareClick = { showShareDialog = true },
+            onCopyIdClick = {
+                post?.id?.let { id ->
+                    clipboard.setText(AnnotatedString(id))
+                    Toast.makeText(context, "Post ID copied", Toast.LENGTH_SHORT).show()
+                }
+            },
+            onContactAuthor = { announcement -> contactAuthorPrivately(announcement) },
+            onReport = { showReportDialog = true },
+            onDelete = { showDeleteConfirm = true },
+            onLike = {
+                val current = post ?: return@PureAnnouncementDetailScreen
+                val uid = currentUid ?: run {
+                    Toast.makeText(context, "Login required", Toast.LENGTH_SHORT).show()
+                    return@PureAnnouncementDetailScreen
+                }
+                val wasLiked = current.likes.containsKey(uid)
+                val shouldLike = !wasLiked
+                post = current.copy(
+                    likes = current.likes.toMutableMap().apply {
+                        if (shouldLike) put(uid, true) else remove(uid)
+                    }
+                )
+                scope.launch {
+                    runCatching { repo.setLike(current.id, shouldLike) }
+                        .onFailure {
+                            post = current
+                            Toast.makeText(context, it.message ?: "Could not update like", Toast.LENGTH_SHORT).show()
+                        }
+                }
+            },
+            onComment = { showCommentDialog = true },
+            onSave = {
+                val id = post?.id ?: return@PureAnnouncementDetailScreen
+                saved = !saved
+                context.getSharedPreferences("saved_announcements", 0)
+                    .edit()
+                    .putBoolean(id, saved)
+                    .apply()
+            },
+            isLikedByCurrentUser = post?.likes?.containsKey(currentUid) == true,
+            isSaved = saved,
+            likeCount = post?.likes?.size ?: 0,
+            commentCount = post?.comments?.size ?: 0,
+            formatTime = { timestamp -> DateUtils.getRelativeTime(timestamp) },
+            renderImage = { url, modifier, scale ->
+                AppAsyncImage(model = url, contentDescription = null, modifier = modifier, contentScale = scale)
+            }
+        )
+    }
 
     if (showCommentDialog && post != null) {
         AlertDialog(

@@ -57,6 +57,7 @@ import com.example.shared.RoutesData
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import com.example.shared.PlaceCategory
+import com.example.shared.campusPlaces
 import androidx.compose.ui.graphics.Color
 import androidx.compose.material3.Badge
 import androidx.compose.material3.BadgedBox
@@ -76,6 +77,7 @@ private fun formatFriendRequestError(message: String?): String {
     val text = message?.trim().orEmpty()
     return when {
         text.contains("already sent you a friend request", ignoreCase = true) -> text
+        text.contains("bidirectional pending", ignoreCase = true) -> "This user has already sent you a friend request."
         text.contains("already been sent", ignoreCase = true) -> "Friend request already sent."
         text.contains("already friends", ignoreCase = true) -> "You are already friends with this user."
         text.contains("yourself", ignoreCase = true) -> "You cannot send a friend request to yourself."
@@ -91,6 +93,7 @@ private fun formatFriendRequestError(message: String?): String {
 fun HomeScreen(
     viewModel: MainViewModel,
     isGuest: Boolean,
+    pendingChatId: String? = null,
     onLoginRequested: () -> Unit,
     onLogout: () -> Unit
 ) {
@@ -105,9 +108,9 @@ fun HomeScreen(
     var announcementTab by rememberSaveable { mutableIntStateOf(0) }
     var searchQuery by rememberSaveable { mutableStateOf("") }
     var isSearching by rememberSaveable { mutableStateOf(false) }
-    var isFilterDockVisible by rememberSaveable { mutableStateOf(false) }
     var selectedCategory by rememberSaveable { mutableStateOf<PlaceCategory?>(null) }
     var selectedAnnouncementId by rememberSaveable { mutableStateOf<String?>(null) }
+    var selectedAnnouncementInitialTab by rememberSaveable { mutableIntStateOf(0) }
     var announcementOpenedFromChat by rememberSaveable { mutableStateOf(false) }
 
     var requests by remember { mutableStateOf<List<FriendRequestEntity>>(emptyList()) }
@@ -129,6 +132,12 @@ fun HomeScreen(
     }
     val cachedCurrentUser by currentUserFlow.collectAsState(initial = null)
     val friends by viewModel.friends.collectAsState()
+
+    LaunchedEffect(Unit) {
+        if (!isGuest) {
+            runCatching { pendingRequestEmails = chatRepository.getOutgoingPendingRequestEmails() }
+        }
+    }
 
     LaunchedEffect(showFriendManager, isGuest) {
         if (!isGuest && showFriendManager) {
@@ -196,6 +205,23 @@ fun HomeScreen(
     var selectedFriendUid by rememberSaveable { mutableStateOf<String?>(null) }
     var selectedFriendName by rememberSaveable { mutableStateOf<String?>(null) }
     var selectedFriendPicUrl by rememberSaveable { mutableStateOf<String?>(null) }
+
+    // Handle notification deep link to open specific chat
+    LaunchedEffect(pendingChatId, friends) {
+        if (pendingChatId != null && pendingChatId.isNotBlank() && friends.isNotEmpty()) {
+            val chat = runCatching {
+                AppDatabase.getInstance(context).chatDao().getChat(pendingChatId)
+            }.getOrNull()
+            
+            if (chat != null) {
+                selectedChatId = pendingChatId
+                selectedFriendUid = chat.friendUid
+                selectedFriendName = chat.friendName
+                selectedFriendPicUrl = chat.friendProfilePicUrl
+                currentScreen = PureAppScreen.CHAT
+            }
+        }
+    }
 
     var chatTabSelection by rememberSaveable { mutableIntStateOf(0) }
 
@@ -308,14 +334,16 @@ fun HomeScreen(
         var acceptRejectError by remember { mutableStateOf<String?>(null) }
         val isDetailActive = selectedChatId != null || selectedAnnouncementId != null || 
                             currentScreen == PureAppScreen.SETTINGS || currentScreen == PureAppScreen.PROFILE || 
-                            currentScreen == PureAppScreen.FRIEND_PROFILE
+                            currentScreen == PureAppScreen.FRIEND_PROFILE || currentScreen == PureAppScreen.SEARCH
 
         PureHomeScreen(
             currentScreen = currentScreen,
                 onScreenSelected = { screen ->
                     selectedChatId = null
                     selectedAnnouncementId = null
+                    selectedAnnouncementInitialTab = 0
                     announcementOpenedFromChat = false
+                    previousScreen = currentScreen
                     currentScreen = screen
                 },
             searchQuery = searchQuery,
@@ -369,90 +397,86 @@ fun HomeScreen(
                         onMapTap = { focusManager.clearFocus() }
                     )
 
-                    AnimatedVisibility(
-                        visible = isFilterDockVisible,
-                        enter = slideInHorizontally { fullWidth -> fullWidth } + fadeIn(),
-                        exit = slideOutHorizontally { fullWidth -> fullWidth } + fadeOut()
+                    // Top quick filter chips: Block, Park, Gates, ATM, Hostel
+                    val primaryCategories = remember {
+                        listOf(
+                            PlaceCategory.BLOCK,
+                            PlaceCategory.PARK,
+                            PlaceCategory.GATE,
+                            PlaceCategory.ATM,
+                            PlaceCategory.HOSTEL
+                        )
+                    }
+                    val allCategoriesWithCounts = remember {
+                        val remaining = PlaceCategory.values()
+                            .filter { it != PlaceCategory.OTHER && it !in primaryCategories && campusPlaces.any { p -> p.category == it } }
+                        (primaryCategories + remaining).map { cat ->
+                            cat to campusPlaces.count { it.category == cat }
+                        }
+                    }
+
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .align(Alignment.TopCenter)
+                            .padding(top = 10.dp),
+                        contentAlignment = Alignment.TopCenter
                     ) {
-                        Box(
+                        Surface(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .align(Alignment.TopCenter)
-                                .padding(top = 12.dp),
-                            contentAlignment = Alignment.TopCenter
+                                .padding(horizontal = 12.dp),
+                            shape = RoundedCornerShape(24.dp),
+                            color = MaterialTheme.colorScheme.surface.copy(alpha = 0.94f),
+                            tonalElevation = 4.dp,
+                            shadowElevation = 6.dp,
+                            border = BorderStroke(
+                                1.dp,
+                                MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f)
+                            )
                         ) {
-                            Surface(
-                                shape = RoundedCornerShape(32.dp),
-                                color = Color.White,
-                                tonalElevation = 0.dp,
-                                border = BorderStroke(
-                                    1.dp,
-                                    MaterialTheme.colorScheme.outline.copy(alpha = 0.6f)
-                                )
+                            LazyRow(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 10.dp, vertical = 6.dp),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Box {
-                                    LazyRow(
-                                        modifier = Modifier.padding(
-                                            horizontal = 12.dp,
-                                            vertical = 4.dp
-                                        ),
-                                        contentPadding = PaddingValues(horizontal = 8.dp),
-                                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                                    ) {
-                                        item {
-                                            FilterChip(
-                                                selected = selectedCategory == null,
-                                                onClick = { selectedCategory = null },
-                                                label = { Text("All") }
+                                item {
+                                    FilterChip(
+                                        selected = selectedCategory == null,
+                                        onClick = { selectedCategory = null },
+                                        label = { Text("All", style = MaterialTheme.typography.labelMedium) },
+                                        leadingIcon = if (selectedCategory == null) {
+                                            { Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(16.dp)) }
+                                        } else null,
+                                        shape = RoundedCornerShape(16.dp)
+                                    )
+                                }
+                                items(
+                                    items = allCategoriesWithCounts,
+                                    key = { it.first.name }
+                                ) { (category, count) ->
+                                    val isSelected = selectedCategory == category
+                                    FilterChip(
+                                        selected = isSelected,
+                                        onClick = {
+                                            selectedCategory = if (isSelected) null else category
+                                        },
+                                        label = {
+                                            Text(
+                                                if (count > 0) "${category.displayLabel} ($count)" else category.displayLabel,
+                                                style = MaterialTheme.typography.labelMedium
                                             )
-                                        }
-                                        items(
-                                            items = PlaceCategory.values()
-                                                .filter { it != PlaceCategory.OTHER },
-                                            key = { it.name }
-                                        ) { category ->
-                                            FilterChip(
-                                                selected = selectedCategory == category,
-                                                onClick = {
-                                                    selectedCategory =
-                                                        if (selectedCategory == category) null else category
-                                                },
-                                                label = {
-                                                    Text(
-                                                        category.name.lowercase()
-                                                            .replaceFirstChar { it.uppercase() }
-                                                    )
-                                                }
-                                            )
-                                        }
-                                    }
-
-                                    IconButton(
-                                        onClick = { isFilterDockVisible = false },
-                                        modifier = Modifier.align(Alignment.TopEnd)
-                                    ) {
-                                        Icon(Icons.Default.Close, "Hide filters")
-                                    }
+                                        },
+                                        leadingIcon = if (isSelected) {
+                                            { Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(16.dp)) }
+                                        } else null,
+                                        shape = RoundedCornerShape(16.dp)
+                                    )
                                 }
                             }
                         }
-                    }
-                }
-
-                AnimatedVisibility(
-                    visible = currentScreen == PureAppScreen.MAP && !isFilterDockVisible,
-                    enter = fadeIn() + slideInVertically { -it },
-                    exit = fadeOut() + slideOutVertically { -it }
-                ) {
-                    SmallFloatingActionButton(
-                        onClick = { isFilterDockVisible = true },
-                        modifier = Modifier
-                            .align(Alignment.TopEnd)
-                            .padding(top = 16.dp, end = 16.dp),
-                        containerColor = MaterialTheme.colorScheme.primary,
-                        contentColor = MaterialTheme.colorScheme.onPrimary
-                    ) {
-                        Icon(Icons.Default.ChevronLeft, "Show filters")
                     }
                 }
                 }
@@ -514,7 +538,15 @@ fun HomeScreen(
                                                     selectedFriendPicUrl = pic
                                                 },
                                                 onAddFriendClick = { showFriendManager = true },
-                                                searchQuery = searchQuery
+                                                searchQuery = searchQuery,
+                                                onMessagePrivately = { id, uid, name, pic ->
+                                                    selectedChatId = id
+                                                    selectedFriendUid = uid
+                                                    selectedFriendName = name
+                                                    selectedFriendPicUrl = pic
+                                                },
+                                                currentUser = currentUser,
+                                                userLocation = uiState.userLocation
                                             )
                                         }
                                     }
@@ -532,8 +564,10 @@ fun HomeScreen(
                                             announcementId = selectedAnnouncementId!!,
                                             repo = announcementRepository,
                                             chatRepository = chatRepository,
+                                            initialTab = selectedAnnouncementInitialTab,
                                             onBack = {
                                                 selectedAnnouncementId = null
+                                                selectedAnnouncementInitialTab = 0
                                                 if (announcementOpenedFromChat && selectedChatId != null) {
                                                     announcementOpenedFromChat = false
                                                     currentScreen = PureAppScreen.CHAT
@@ -551,7 +585,53 @@ fun HomeScreen(
                                             onTabSelected = { announcementTab = it },
                                             onSettingsClick = { currentScreen = PureAppScreen.SETTINGS },
                                             onAddFriendClick = { showFriendManager = true },
-                                            onAnnouncementClick = { id -> selectedAnnouncementId = id }
+                                            onAnnouncementClick = { id ->
+                                                selectedAnnouncementId = id
+                                                selectedAnnouncementInitialTab = 0
+                                            },
+                                            onOpenTeamsClick = { id ->
+                                                selectedAnnouncementId = id
+                                                selectedAnnouncementInitialTab = 2
+                                            }
+                                        )
+                                    }
+                                }
+
+                                PureAppScreen.EVENTS -> {
+                                    if (selectedAnnouncementId != null) {
+                                        AnnouncementDetailScreen(
+                                            announcementId = selectedAnnouncementId!!,
+                                            repo = announcementRepository,
+                                            chatRepository = chatRepository,
+                                            initialTab = selectedAnnouncementInitialTab,
+                                            onBack = {
+                                                selectedAnnouncementId = null
+                                                selectedAnnouncementInitialTab = 0
+                                            }
+                                        )
+                                    } else {
+                                        PureEventsHubScreen(
+                                            onEventClick = { id ->
+                                                selectedAnnouncementId = id
+                                                selectedAnnouncementInitialTab = 0
+                                            },
+                                            onOpenTeamsClick = { id ->
+                                                selectedAnnouncementId = id
+                                                selectedAnnouncementInitialTab = 2
+                                            },
+                                            onCreateEventClick = {
+                                                if (isGuest) {
+                                                    onLoginRequested()
+                                                } else {
+                                                    announcementTab = 2
+                                                    currentScreen = PureAppScreen.ANNOUNCEMENTS
+                                                }
+                                            },
+                                            searchQuery = searchQuery,
+                                            onSearchQueryChange = { searchQuery = it },
+                                            renderImage = { url, modifier, scale ->
+                                                AppAsyncImage(model = url, contentDescription = null, modifier = modifier, contentScale = scale)
+                                            }
                                         )
                                     }
                                 }
@@ -648,6 +728,23 @@ fun HomeScreen(
                                             onBack = { currentScreen = PureAppScreen.CHAT }
                                         )
                                     }
+                                }
+
+                                PureAppScreen.SEARCH -> {
+                                    GlobalSearchNav(
+                                        onBack = { currentScreen = previousScreen },
+                                        onUserClick = { uid ->
+                                            selectedFriendUid = uid
+                                            currentScreen = PureAppScreen.FRIEND_PROFILE
+                                        },
+                                        onPostClick = { postId ->
+                                            selectedAnnouncementId = postId
+                                            currentScreen = PureAppScreen.ANNOUNCEMENTS
+                                        },
+                                        onGroupClick = { _ ->
+                                            currentScreen = previousScreen
+                                        }
+                                    )
                                 }
                                 else -> {}
                             }

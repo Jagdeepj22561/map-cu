@@ -42,7 +42,8 @@ data class Announcement(
     val eventMode: String? = null, // "Solo" or "Team"
     val eventMaxMembers: Int? = null,
     val eventDepartments: String? = null,
-    val eventLink: String? = null
+    val eventLink: String? = null,
+    val eventCategory: String? = null
 )
 
 fun buildAnnouncementId(authorUid: String?, timestamp: Long): String {

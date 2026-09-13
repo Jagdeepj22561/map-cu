@@ -1,5 +1,6 @@
 package com.example.maps123.ui.screens
 
+import android.net.Uri
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
@@ -67,26 +68,22 @@ fun ChatDetailScreen(
     var isBlocked by remember { mutableStateOf(false) }
     var isSearchActive by remember { mutableStateOf(false) }
     var searchChatQuery by remember { mutableStateOf("") }
+    var loadingMore by remember { mutableStateOf(false) }
+    var fullScreenImageUrl by remember { mutableStateOf<String?>(null) }
+    var pendingImageUri by remember { mutableStateOf<Uri?>(null) }
+    var pendingImageCaption by remember { mutableStateOf("") }
+    var pendingImageUrl by remember { mutableStateOf<String?>(null) }
+    var isUploadingImage by remember { mutableStateOf(false) }
+
     val clipboardManager = LocalClipboardManager.current
     val picker = rememberLauncherForActivityResult(
         ActivityResultContracts.PickVisualMedia()
     ) { uri ->
         if (uri != null) {
-            scope.launch {
-                try {
-                    val url = repo.uploadImage(uri)
-                    repo.sendMessage(
-                        chatId = chatId,
-                        content = "",
-                        friendUid = targetUid,
-                        imageUrl = url
-                    )
-                } catch (e: Exception) {
-                    Toast.makeText(context, e.message ?: "Upload failed", Toast.LENGTH_SHORT).show()
-                }
-            }
+            pendingImageUri = uri
         }
     }
+
     LaunchedEffect(chatId) {
         runCatching {
             repo.setActiveChat(chatId)
@@ -108,6 +105,23 @@ fun ChatDetailScreen(
     DisposableEffect(chatId) {
         onDispose {
             repo.setActiveChat(null)
+        }
+    }
+
+    val loadMoreCallback = remember(chatId, loadingMore, messages.size) {
+        {
+            if (!loadingMore && messages.isNotEmpty()) {
+                loadingMore = true
+                scope.launch {
+                    val oldestMessage = messages.minByOrNull { it.timestamp }
+                    if (oldestMessage != null) {
+                        runCatching {
+                            repo.loadOlderMessages(chatId, oldestMessage.timestamp)
+                        }
+                    }
+                    loadingMore = false
+                }
+            }
         }
     }
 
@@ -215,6 +229,95 @@ fun ChatDetailScreen(
         },
         renderImage = { url, modifier, scale ->
             AppAsyncImage(model = url, contentDescription = null, modifier = modifier, contentScale = scale)
+        },
+        canEditMessage = { message ->
+            System.currentTimeMillis() - message.timestamp < 2 * 60 * 1000
+        },
+        onLoadMore = loadMoreCallback,
+        onImageClick = { imageUrl ->
+            fullScreenImageUrl = imageUrl
         }
     )
- }
+
+    if (pendingImageUri != null) {
+        val uri = pendingImageUri!!
+        val imageUrl = pendingImageUrl
+
+        if (imageUrl == null && !isUploadingImage) {
+            isUploadingImage = true
+            LaunchedEffect(uri) {
+                try {
+                    val url = repo.uploadImage(uri)
+                    pendingImageUrl = url
+                } catch (e: Exception) {
+                    Toast.makeText(context, e.message ?: "Upload failed", Toast.LENGTH_SHORT).show()
+                    pendingImageUri = null
+                    pendingImageUrl = null
+                }
+                isUploadingImage = false
+            }
+        }
+
+        if (isUploadingImage) {
+            ImagePreviewDialog(
+                imageUrl = "",
+                caption = "",
+                onCaptionChange = {},
+                onSend = {},
+                onDismiss = {
+                    pendingImageUri = null
+                    pendingImageUrl = null
+                },
+                renderImage = { _, modifier, scale ->
+                    Box(
+                        modifier = modifier.fillMaxSize(),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text("Uploading...")
+                    }
+                }
+            )
+        } else if (imageUrl != null) {
+            ImagePreviewDialog(
+                imageUrl = imageUrl,
+                caption = pendingImageCaption,
+                onCaptionChange = { pendingImageCaption = it },
+                onSend = { caption ->
+                    scope.launch {
+                        try {
+                            repo.sendMessage(
+                                chatId = chatId,
+                                content = caption,
+                                friendUid = targetUid,
+                                imageUrl = imageUrl
+                            )
+                            pendingImageUri = null
+                            pendingImageUrl = null
+                            pendingImageCaption = ""
+                        } catch (e: Exception) {
+                            Toast.makeText(context, e.message ?: "Send failed", Toast.LENGTH_SHORT).show()
+                        }
+                    }
+                },
+                onDismiss = {
+                    pendingImageUri = null
+                    pendingImageUrl = null
+                    pendingImageCaption = ""
+                },
+                renderImage = { url, modifier, scale ->
+                    AppAsyncImage(model = url, contentDescription = null, modifier = modifier, contentScale = scale)
+                }
+            )
+        }
+    }
+
+    if (fullScreenImageUrl != null) {
+        FullScreenImageDialog(
+            imageUrl = fullScreenImageUrl!!,
+            onDismiss = { fullScreenImageUrl = null },
+            renderImage = { url, modifier, scale ->
+                AppAsyncImage(model = url, contentDescription = null, modifier = modifier, contentScale = scale)
+            }
+        )
+    }
+}

@@ -12,6 +12,9 @@ import com.example.shared.model.AnnouncementType
 import io.github.jan.supabase.postgrest.from
 import io.github.jan.supabase.postgrest.query.Order
 import io.github.jan.supabase.postgrest.query.Columns
+import io.github.jan.supabase.realtime.channel
+import io.github.jan.supabase.realtime.postgresChangeFlow
+import io.github.jan.supabase.realtime.PostgresAction
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.sync.Mutex
@@ -40,11 +43,63 @@ class AnnouncementRepository(context: Context) {
     fun startFeedSync() {
         if (syncJob?.isActive == true) return
         syncJob = scope.launch {
-            refreshFeed(true)
-            // Polling replaces the former Firestore listener until the chat
-            // migration enables a shared Supabase Realtime subscription.
-            while (true) {
-                delay(15_000)
+            // First load: only show initial loading spinner if local cache is empty
+            val hasLocalCache = dao.getCount() > 0
+            refreshFeed(showLoading = !hasLocalCache)
+
+            // Setup Realtime subscription for instant updates on announcements, comments, and likes
+            runCatching {
+                val channel = SupabaseProvider.client.channel("announcements-feed")
+
+                launch {
+                    channel.postgresChangeFlow<PostgresAction.Insert>(schema = "public") {
+                        table = "announcements"
+                    }.collect {
+                        Log.d("AnnouncementRepo", "New announcement inserted, refreshing feed")
+                        runCatching { refreshFeed(false, force = true) }
+                    }
+                }
+
+                launch {
+                    channel.postgresChangeFlow<PostgresAction.Delete>(schema = "public") {
+                        table = "announcements"
+                    }.collect { action ->
+                        val id = action.oldRecord["id"]?.toString()
+                        if (id != null) {
+                            dao.deleteById(id)
+                        } else {
+                            runCatching { refreshFeed(false, force = true) }
+                        }
+                    }
+                }
+
+                launch {
+                    channel.postgresChangeFlow<PostgresAction.Insert>(schema = "public") {
+                        table = "announcement_comments"
+                    }.collect {
+                        Log.d("AnnouncementRepo", "New comment inserted, refreshing feed")
+                        runCatching { refreshFeed(false, force = true) }
+                    }
+                }
+
+                launch {
+                    channel.postgresChangeFlow<PostgresAction.Insert>(schema = "public") {
+                        table = "announcement_likes"
+                    }.collect {
+                        Log.d("AnnouncementRepo", "New like inserted, refreshing feed")
+                        runCatching { refreshFeed(false, force = true) }
+                    }
+                }
+
+                channel.subscribe()
+                Log.i("AnnouncementRepo", "Realtime subscription active for announcements feed")
+            }.onFailure {
+                Log.w("AnnouncementRepo", "Failed to start Realtime subscription, falling back to light polling", it)
+            }
+
+            // Light polling fallback at 60s intervals instead of aggressive 15s
+            while (isActive) {
+                delay(60_000)
                 runCatching { refreshFeed(false) }
                     .onFailure { Log.w("AnnouncementRepo", "Feed refresh failed", it) }
             }
@@ -81,14 +136,30 @@ class AnnouncementRepository(context: Context) {
             filter { eq("announcement_id", id) }
         }.decodeList<NestedComment>()
 
+        val authorIds = comments.map { it.authorId }.distinct().filter { it.isNotBlank() }
+        val profilesById = if (authorIds.isNotEmpty()) {
+            runCatching {
+                client.from("profiles").select {
+                    filter { isIn("id", authorIds) }
+                }.decodeList<AuthorProfileRow>().associateBy { it.id }
+            }.getOrDefault(emptyMap())
+        } else emptyMap()
+
         val result = row.copy(
             likes = likes.associate { it.userId to true },
             comments = comments.associate { comment ->
+                val profile = comment.profile
+                val fallbackProfile = profilesById[comment.authorId]
+                val authorName = profile?.name?.takeIf { it.isNotBlank() }
+                    ?: fallbackProfile?.name?.takeIf { it.isNotBlank() }
+                    ?: ""
+                val authorPhoto = profile?.profilePicUrl?.takeIf { it.isNotBlank() }
+                    ?: fallbackProfile?.profilePicUrl?.takeIf { it.isNotBlank() }
                 comment.id to com.example.shared.model.Comment(
                     id = comment.id,
                     userId = comment.authorId,
-                    userName = comment.profile?.name.orEmpty(),
-                    userProfilePic = comment.profile?.profilePicUrl,
+                    userName = authorName,
+                    userProfilePic = authorPhoto,
                     text = comment.body,
                     timestamp = comment.timestamp()
                 )
@@ -101,7 +172,18 @@ class AnnouncementRepository(context: Context) {
     suspend fun createAnnouncement(announcement: Announcement) {
         val userId = AuthRepository.currentUserId() ?: error("Not logged in")
         require(announcement.authorUid == userId) { "You can only create your own announcement" }
-        SupabaseProvider.client.from("announcements").insert(announcement.toRow())
+        runCatching {
+            SupabaseProvider.client.from("announcements").insert(announcement.toRow())
+        }.onFailure { error ->
+            // If the remote schema doesn't have event_category column yet, retry without serializing event_category
+            if (error.message?.contains("event_category", ignoreCase = true) == true ||
+                error.message?.contains("column", ignoreCase = true) == true
+            ) {
+                SupabaseProvider.client.from("announcements").insert(announcement.toCompatRow())
+            } else {
+                throw error
+            }
+        }
         dao.insert(announcement.toCacheEntity())
     }
 
@@ -151,7 +233,24 @@ class AnnouncementRepository(context: Context) {
         }
     }
 
-    suspend fun refreshNow() = refreshFeed(showLoading = false)
+    suspend fun deleteComment(announcementId: String, commentId: String) {
+        val uid = AuthRepository.currentUserId() ?: error("Login required")
+        feedMutationMutex.withLock {
+            runCatching {
+                SupabaseProvider.client.from("announcement_comments").delete {
+                    filter {
+                        eq("id", commentId)
+                        eq("author_id", uid)
+                    }
+                }
+            }
+            updateCachedAnnouncement(announcementId) { announcement ->
+                announcement.copy(comments = announcement.comments - commentId)
+            }
+        }
+    }
+
+    suspend fun refreshNow() = refreshFeed(showLoading = false, force = true)
 
     private suspend fun updateCachedAnnouncement(
         announcementId: String,
@@ -163,11 +262,32 @@ class AnnouncementRepository(context: Context) {
             ?.let { dao.insert(it.toCacheEntity()) }
     }
 
-    private suspend fun refreshFeed(showLoading: Boolean) {
+    private suspend fun refreshFeed(showLoading: Boolean, force: Boolean = false) {
         if (showLoading) _isInitialLoadRunning.value = true
         try {
             feedMutationMutex.withLock {
                 val client = SupabaseProvider.client
+
+                // Quick check: if not forced and we have local cache, check if latest timestamp in Supabase is newer
+                val localLatestTimestamp = dao.getLatestTimestamp()
+                val localCount = dao.getCount()
+                if (!force && localCount > 0 && localLatestTimestamp != null && localLatestTimestamp > 0) {
+                    val remoteLatest = runCatching {
+                        client.from("announcements").select {
+                            Columns.raw("timestamp")
+                            order("timestamp", Order.DESCENDING)
+                            limit(1)
+                        }.decodeList<TimestampOnlyRow>().firstOrNull()?.timestamp
+                    }.getOrNull()
+
+                    // If remote latest timestamp is not newer than our latest cached timestamp,
+                    // we don't need to do expensive multi-table queries (announcements + likes + comments + profiles)
+                    if (remoteLatest != null && remoteLatest <= localLatestTimestamp) {
+                        Log.d("AnnouncementRepo", "Cache is fresh (remote: $remoteLatest, local: $localLatestTimestamp), skipping full fetch")
+                        return@withLock
+                    }
+                }
+
                 val remote = client.from("announcements").select {
                     order("timestamp", Order.DESCENDING)
                     limit(20)
@@ -188,13 +308,29 @@ class AnnouncementRepository(context: Context) {
                     val likesByPost = allLikes.filter { it.announcementId in remoteIds }
                         .groupBy({ it.announcementId }) { it.userId }
 
+                    val allAuthorIds = allComments.map { it.authorId }.distinct().filter { it.isNotBlank() }
+                    val profilesById = if (allAuthorIds.isNotEmpty()) {
+                        runCatching {
+                            client.from("profiles").select {
+                                filter { isIn("id", allAuthorIds) }
+                            }.decodeList<AuthorProfileRow>().associateBy { it.id }
+                        }.getOrDefault(emptyMap())
+                    } else emptyMap()
+
                     val commentsByPost = allComments.filter { it.announcementId in remoteIds }
                         .groupBy({ it.announcementId }) { comment ->
+                            val profile = comment.profile
+                            val fallbackProfile = profilesById[comment.authorId]
+                            val authorName = profile?.name?.takeIf { it.isNotBlank() }
+                                ?: fallbackProfile?.name?.takeIf { it.isNotBlank() }
+                                ?: ""
+                            val authorPhoto = profile?.profilePicUrl?.takeIf { it.isNotBlank() }
+                                ?: fallbackProfile?.profilePicUrl?.takeIf { it.isNotBlank() }
                             com.example.shared.model.Comment(
                                 id = comment.id,
                                 userId = comment.authorId,
-                                userName = comment.profile?.name.orEmpty(),
-                                userProfilePic = comment.profile?.profilePicUrl,
+                                userName = authorName,
+                                userProfilePic = authorPhoto,
                                 text = comment.body,
                                 timestamp = comment.timestamp()
                             )
@@ -236,11 +372,45 @@ private data class AnnouncementRow(
     @SerialName("event_max_members") val eventMaxMembers: Int? = null,
     @SerialName("event_departments") val eventDepartments: String? = null,
     @SerialName("event_link") val eventLink: String? = null,
+    @SerialName("event_category") val eventCategory: String? = null,
     @SerialName("announcement_likes") val announcementLikes: List<NestedLike> = emptyList(),
     @SerialName("announcement_comments") val announcementComments: List<NestedComment> = emptyList()
 )
 
 private fun Announcement.toRow() = AnnouncementRow(
+    id, requireNotNull(authorUid), title, content, imageUrl, timestamp, author, authorProfilePicUrl,
+    type.name, shareCount, viewCount, itemName, place, time, reward, eventVenue, eventTime,
+    eventPurpose, eventDlType, eventMode, eventMaxMembers, eventDepartments, eventLink, eventCategory
+)
+
+@Serializable
+private data class AnnouncementCompatRow(
+    val id: String,
+    @SerialName("author_id") val authorId: String,
+    val title: String,
+    val content: String,
+    @SerialName("image_url") val imageUrl: String? = null,
+    val timestamp: Long,
+    val author: String,
+    @SerialName("author_profile_pic_url") val authorProfilePicUrl: String? = null,
+    val type: String,
+    @SerialName("share_count") val shareCount: Int = 0,
+    @SerialName("view_count") val viewCount: Int = 0,
+    @SerialName("item_name") val itemName: String? = null,
+    val place: String? = null,
+    val time: String? = null,
+    val reward: String? = null,
+    @SerialName("event_venue") val eventVenue: String? = null,
+    @SerialName("event_time") val eventTime: String? = null,
+    @SerialName("event_purpose") val eventPurpose: String? = null,
+    @SerialName("event_dl_type") val eventDlType: String? = null,
+    @SerialName("event_mode") val eventMode: String? = null,
+    @SerialName("event_max_members") val eventMaxMembers: Int? = null,
+    @SerialName("event_departments") val eventDepartments: String? = null,
+    @SerialName("event_link") val eventLink: String? = null
+)
+
+private fun Announcement.toCompatRow() = AnnouncementCompatRow(
     id, requireNotNull(authorUid), title, content, imageUrl, timestamp, author, authorProfilePicUrl,
     type.name, shareCount, viewCount, itemName, place, time, reward, eventVenue, eventTime,
     eventPurpose, eventDlType, eventMode, eventMaxMembers, eventDepartments, eventLink
@@ -253,7 +423,7 @@ private fun AnnouncementRow.toAnnouncement() = Announcement(
     shareCount = shareCount, viewCount = viewCount, itemName = itemName, place = place, time = time,
     reward = reward, eventVenue = eventVenue, eventTime = eventTime, eventPurpose = eventPurpose,
     eventDlType = eventDlType, eventMode = eventMode, eventMaxMembers = eventMaxMembers,
-    eventDepartments = eventDepartments, eventLink = eventLink,
+    eventDepartments = eventDepartments, eventLink = eventLink, eventCategory = eventCategory,
     likes = announcementLikes.associate { it.userId to true },
     comments = announcementComments.associate { comment ->
         comment.id to com.example.shared.model.Comment(
@@ -290,6 +460,13 @@ private data class AnnouncementCommentInsert(
 
 @Serializable private data class NestedLike(@SerialName("user_id") val userId: String)
 @Serializable
+private data class AuthorProfileRow(
+    val id: String,
+    val name: String = "",
+    @SerialName("profile_pic_url") val profilePicUrl: String = ""
+)
+
+@Serializable
 private data class CommentProfile(
     val name: String = "",
     @SerialName("profile_pic_url") val profilePicUrl: String = ""
@@ -306,3 +483,8 @@ private data class NestedComment(
 ) {
     fun timestamp() = runCatching { java.time.OffsetDateTime.parse(createdAt).toInstant().toEpochMilli() }.getOrDefault(0L)
 }
+
+@Serializable
+private data class TimestampOnlyRow(
+    val timestamp: Long
+)

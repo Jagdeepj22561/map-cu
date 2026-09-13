@@ -112,7 +112,7 @@ kotlin {
             dependencies {
                 implementation("androidx.compose.runtime:runtime:1.7.1")
                 implementation("androidx.compose.ui:ui-tooling-preview:1.7.1")
-                implementation("io.ktor:ktor-client-android:3.0.3")
+                implementation("io.ktor:ktor-client-cio:3.0.3")
             }
         }
 

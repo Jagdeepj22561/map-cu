@@ -16,30 +16,30 @@ import kotlinx.coroutines.flow.asStateFlow
 actual class ChatRepository : IChatRepository {
     private val _allChats = MutableStateFlow<List<PureChat>>(emptyList())
 
-    override val allChats: Flow<List<PureChat>> = _allChats.asStateFlow()
+    actual override val allChats: Flow<List<PureChat>> = _allChats.asStateFlow()
 
-    override suspend fun getFriends(): List<PureUser> = emptyList()
+    actual override suspend fun getFriends(): List<PureUser> = emptyList()
 
-    override suspend fun getNearbyUsers(lat: Double, lng: Double): List<PureUser> = emptyList()
+    actual override suspend fun getNearbyUsers(lat: Double, lng: Double): List<PureUser> = emptyList()
 
-    override suspend fun sendFriendRequest(email: String) {
+    actual override suspend fun sendFriendRequest(email: String) {
         // Friend discovery/request flow is handled by the Supabase repositories.
     }
 
-    override suspend fun createChatForFriend(friendUid: String, friendName: String): String {
+    actual override suspend fun createChatForFriend(friendUid: String, friendName: String): String {
         require(friendUid.isNotBlank()) { "Friend UID cannot be empty" }
         return "${getCurrentUserUid() ?: "user"}_$friendUid"
     }
 
-    override suspend fun toggleGhostMode(isGhostMode: Boolean) {
+    actual override suspend fun toggleGhostMode(isGhostMode: Boolean) {
         // Handled by the Supabase profile repository.
     }
 
-    override fun listenToUserChats() {
+    actual override fun listenToUserChats() {
         // Supabase Realtime will own chat synchronization.
     }
 
-    override fun startSync() {
+    actual override fun startSync() {
         listenToUserChats()
     }
 
@@ -47,8 +47,8 @@ actual class ChatRepository : IChatRepository {
         // No Firebase listener to remove.
     }
 
-    override suspend fun getChatId(myUid: String, friendUid: String): String =
+    actual override suspend fun getChatId(myUid: String, friendUid: String): String =
         if (myUid < friendUid) "${myUid}_$friendUid" else "${friendUid}_$myUid"
 
-    override fun getCurrentUserUid(): String? = null
+    actual override fun getCurrentUserUid(): String? = null
 }

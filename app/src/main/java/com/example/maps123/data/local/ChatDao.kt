@@ -64,6 +64,12 @@ interface ChatDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertMessages(messages: List<MessageEntity>)
 
+    @Query("SELECT * FROM messages WHERE messageId = :messageId")
+    suspend fun getMessageById(messageId: String): MessageEntity?
+
+    @Query("DELETE FROM messages WHERE messageId = :messageId")
+    suspend fun deleteMessageById(messageId: String)
+
     @Query("UPDATE messages SET isSynced = :isSynced WHERE messageId = :messageId")
     suspend fun updateMessageSyncStatus(messageId: String, isSynced: Boolean)
 

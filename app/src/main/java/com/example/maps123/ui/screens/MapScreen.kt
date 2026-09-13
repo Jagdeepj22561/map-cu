@@ -89,7 +89,8 @@ fun MapScreen(
                     name = r.name,
                     latitude = r.latitude,
                     longitude = r.longitude,
-                    category = PlaceCategory.valueOf(r.category)
+                    category = PlaceCategory.values().firstOrNull { it.name.equals(r.category, ignoreCase = true) }
+                        ?: PlaceCategory.OTHER
                 )
             }
         }
@@ -140,18 +141,23 @@ fun MapScreen(
                 }
             }
 
-            when {
-                zoomState.floatValue < 15f ->
-                    places.filter {
-                        it.category.name in listOf("GATE", "HOSTEL")
-                    }
+            // Only apply zoom-based filtering when no category is explicitly selected
+            if (selectedCategory == null) {
+                when {
+                    zoomState.floatValue < 15f ->
+                        places.filter {
+                            it.category.name in listOf("GATE", "HOSTEL")
+                        }
 
-                zoomState.floatValue < 17f ->
-                    places.filter {
-                        it.category.name in listOf("GATE", "HOSTEL", "BLOCK")
-                    }
+                    zoomState.floatValue < 17f ->
+                        places.filter {
+                            it.category.name in listOf("GATE", "HOSTEL", "BLOCK")
+                        }
 
-                else -> places
+                    else -> places
+                }
+            } else {
+                places
             }
         }
     }

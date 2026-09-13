@@ -26,6 +26,10 @@ fun PureChatScreen(
     onNewChatClick: () -> Unit,
     onChatLongClick: (PureChat) -> Unit,
     searchQuery: String = "",
+    onMessagePrivately: (senderUid: String, senderName: String) -> Unit = { _, _ -> },
+    formatTime: ((Long) -> String)? = null,
+    onGroupClick: () -> Unit = {},
+    onNewGroupClick: () -> Unit = {},
     renderImage: @Composable (String?, Modifier, ContentScale) -> Unit
 ) {
     val chats by repository.allChats.collectAsState(emptyList())
@@ -53,19 +57,18 @@ fun PureChatScreen(
         }
 
         if (selectedTab == 1) {
-            PureGroupsScreen()
+            PureGroupsScreen(onMessagePrivately = onMessagePrivately)
             return@Column
         }
 
         Box(Modifier.fillMaxSize()) {
             Column(Modifier.fillMaxSize()) {
-                Row(Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Column(Modifier.weight(1f)) {
-                        Text("Messages", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
-                        Text("Stay connected with your campus", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    }
-                    IconButton(onClick = onNewChatClick) { Icon(Icons.Default.Edit, "New chat") }
-                }
+                Text(
+                    "Messages",
+                    style = MaterialTheme.typography.headlineSmall,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.padding(horizontal = 18.dp, vertical = 8.dp)
+                )
                 if (filteredChats.isEmpty()) {
                     Column(Modifier.fillMaxSize(), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
                         Surface(Modifier.size(72.dp), shape = MaterialTheme.shapes.large, color = MaterialTheme.colorScheme.primaryContainer) {
@@ -80,12 +83,19 @@ fun PureChatScreen(
                 } else {
                     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp), verticalArrangement = Arrangement.spacedBy(3.dp)) {
                         items(filteredChats, key = { it.chatId }) { chat ->
-                            PureChatItem(chat = chat, onClick = { onChatClick(chat) }, onLongClick = { onChatLongClick(chat) }, renderImage = renderImage)
+                            PureChatItem(
+                                chat = chat,
+                                onClick = { onChatClick(chat) },
+                                onLongClick = { onChatLongClick(chat) },
+                                formatTime = formatTime,
+                                renderImage = renderImage
+                            )
                         }
                     }
                 }
             }
             Column(Modifier.align(Alignment.BottomEnd).navigationBarsPadding().padding(end = 18.dp, bottom = 18.dp), horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                SmallFloatingActionButton(onClick = onAddFriendClick) { Icon(Icons.Default.PersonAdd, "Friends") }
                 SmallFloatingActionButton(onClick = onNearbyClick) { Icon(Icons.Default.LocationOn, "Show Nearby Friends") }
                 FloatingActionButton(onClick = onNewChatClick) { Icon(Icons.Default.Edit, "New chat") }
             }

@@ -79,7 +79,7 @@ fun PureFriendsScreen() {
             people.isEmpty() -> Box(Modifier.fillMaxSize(), Alignment.Center) { Text("No new people to suggest right now.", color = MaterialTheme.colorScheme.onSurfaceVariant) }
             else -> LazyColumn(
                 modifier = Modifier.fillMaxSize(),
-                contentPadding = PaddingValues(horizontal = 16.dp, bottom = 24.dp),
+                contentPadding = PaddingValues(16.dp),
                 verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
                 items(people, key = { it.userId }) { person ->

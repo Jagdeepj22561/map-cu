@@ -4,21 +4,66 @@ import android.content.Context
 import androidx.room.Database
 import androidx.room.Room
 import androidx.room.RoomDatabase
+import androidx.room.migration.Migration
+import androidx.sqlite.db.SupportSQLiteDatabase
 import com.example.maps123.data.local.AppDatabase.Companion.INSTANCE
 import com.example.maps123.data.repository.AuthRepository
 
+// Migration 28→29: recreate cached_announcements with current schema (new event columns added)
+private val MIGRATION_28_29 = object : Migration(28, 29) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("DROP TABLE IF EXISTS `cached_announcements`")
+        db.execSQL("""
+            CREATE TABLE IF NOT EXISTS `cached_announcements` (
+                `id` TEXT NOT NULL,
+                `title` TEXT NOT NULL,
+                `content` TEXT NOT NULL,
+                `imageUrl` TEXT,
+                `timestamp` INTEGER NOT NULL,
+                `author` TEXT NOT NULL,
+                `authorUid` TEXT,
+                `authorProfilePicUrl` TEXT,
+                `type` TEXT NOT NULL,
+                `likesJson` TEXT NOT NULL,
+                `commentsJson` TEXT NOT NULL,
+                `shareCount` INTEGER NOT NULL,
+                `viewCount` INTEGER NOT NULL,
+                `itemName` TEXT,
+                `place` TEXT,
+                `time` TEXT,
+                `reward` TEXT,
+                `eventVenue` TEXT,
+                `eventTime` TEXT,
+                `eventPurpose` TEXT,
+                `eventDlType` TEXT,
+                `eventMode` TEXT,
+                `eventMaxMembers` INTEGER,
+                `eventDepartments` TEXT,
+                `eventLink` TEXT,
+                `eventCategory` TEXT,
+                `cachedAt` INTEGER NOT NULL,
+                PRIMARY KEY(`id`)
+            )
+        """.trimIndent())
+    }
+}
+
+// Migration 29→30: future-proof bump (no schema changes)
+private val MIGRATION_29_30 = object : Migration(29, 30) {
+    override fun migrate(db: SupportSQLiteDatabase) { /* reserved */ }
+}
 
 @Database(
     entities = [
-        RouteEntity::class, 
+        RouteEntity::class,
         PlaceEntity::class,
-        UserEntity::class, 
+        UserEntity::class,
         AnnouncementCacheEntity::class,
-        ChatEntity::class, 
-        MessageEntity::class, 
+        ChatEntity::class,
+        MessageEntity::class,
         FriendRequestEntity::class
-    ], 
-    version = 28
+    ],
+    version = 30
 )
 abstract class AppDatabase : RoomDatabase() {
 
@@ -28,13 +73,12 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun announcementDao(): AnnouncementDao
     abstract fun chatDao(): ChatDao
 
-
-
     companion object {
         @Volatile
         private var INSTANCE: AppDatabase? = null
         @Volatile
         private var ACTIVE_DB_NAME: String? = null
+
         fun clearInstance() {
             INSTANCE?.close()
             INSTANCE = null
@@ -64,13 +108,15 @@ abstract class AppDatabase : RoomDatabase() {
                     AppDatabase::class.java,
                     dbName
                 )
-                    .fallbackToDestructiveMigration()
+                    .addMigrations(MIGRATION_28_29, MIGRATION_29_30)
+                    .fallbackToDestructiveMigration(true)
+                    .fallbackToDestructiveMigrationOnDowngrade(true)
                     .build()
                 INSTANCE = instance
                 ACTIVE_DB_NAME = dbName
                 instance
             }
         }
-
     }
 }
+

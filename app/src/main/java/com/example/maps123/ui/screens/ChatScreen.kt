@@ -15,12 +15,18 @@ import com.example.shared.model.PureChat
 import com.example.maps123.ui.components.AppAsyncImage
 import com.example.maps123.utils.toPureUser
 
+import com.google.android.gms.maps.model.LatLng
+import com.example.shared.GeoPoint
+import com.example.shared.utils.GeoUtils
+import com.example.shared.model.PureUser
+
 private fun formatFriendRequestError(message: String?): String {
     val text = message?.trim().orEmpty()
     return when {
         text.contains("scope left the composition", ignoreCase = true) -> ""
         text.contains("job was cancelled", ignoreCase = true) -> ""
         text.contains("already sent you a friend request", ignoreCase = true) -> text
+        text.contains("bidirectional pending", ignoreCase = true) -> "This user has already sent you a friend request."
         text.contains("already been sent", ignoreCase = true) -> "Friend request already sent."
         text.contains("already friends", ignoreCase = true) -> "You are already friends with this user."
         text.contains("yourself", ignoreCase = true) -> "You cannot send a friend request to yourself."
@@ -44,7 +50,10 @@ fun ChatScreen(
     onTabSelected: (Int) -> Unit,
     onChatClick: (String, String, String, String?) -> Unit,
     onAddFriendClick: () -> Unit,
-    searchQuery: String
+    searchQuery: String,
+    onMessagePrivately: (String, String, String, String?) -> Unit = { _, _, _, _ -> },
+    currentUser: UserEntity? = null,
+    userLocation: LatLng? = null
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -71,17 +80,44 @@ fun ChatScreen(
     var nearbyError by remember { mutableStateOf<String?>(null) }
     var nearbyLimitDialogMessage by remember { mutableStateOf<String?>(null) }
     var pendingRequestEmails by remember { mutableStateOf<Set<String>>(emptySet()) }
+    LaunchedEffect(Unit) {
+        runCatching { pendingRequestEmails = chatRepository.getOutgoingPendingRequestEmails() }
+    }
     var nearbyLastRefreshedAt by remember { mutableStateOf(chatRepository.getNearbyUsersLastRefreshTime()) }
     var nearbyTimeTicker by remember { mutableLongStateOf(System.currentTimeMillis()) }
     var nearbyRefreshRemainingMs by remember { mutableLongStateOf(chatRepository.getNearbyUsersRefreshRemainingMs()) }
 
     val pureFriends = remember(friends) { friends.map { it.toPureUser() } }
 
+    val currentLat = userLocation?.latitude ?: currentUser?.latitude ?: 0.0
+    val currentLng = userLocation?.longitude ?: currentUser?.longitude ?: 0.0
+
+    val pureNearbyUsers = remember(nearbyUsers, currentLat, currentLng) {
+        nearbyUsers.map { user ->
+            val dist = if (currentLat != 0.0 && currentLng != 0.0 && user.latitude != 0.0 && user.longitude != 0.0) {
+                GeoUtils.distanceMeters(
+                    GeoPoint(currentLat, currentLng),
+                    GeoPoint(user.latitude, user.longitude)
+                )
+            } else {
+                null
+            }
+            user.toPureUser(distanceMeters = dist)
+        }.sortedWith(
+            compareBy<PureUser> { it.distanceMeters ?: Double.MAX_VALUE }
+                .thenByDescending { it.lastUpdated }
+        )
+    }
+
     suspend fun loadNearbyUsers(forceRefresh: Boolean) {
         nearbyLoading = true
         nearbyError = null
         try {
-            nearbyUsers = chatRepository.getNearbyUsersImplementation(forceRefresh = forceRefresh)
+            nearbyUsers = chatRepository.getNearbyUsersImplementation(
+                forceRefresh = forceRefresh,
+                userLat = currentLat,
+                userLng = currentLng
+            )
             nearbyLastRefreshedAt = chatRepository.getNearbyUsersLastRefreshTime()
             nearbyRefreshRemainingMs = chatRepository.getNearbyUsersRefreshRemainingMs()
         } catch (e: Exception) {
@@ -139,9 +175,11 @@ fun ChatScreen(
 
     if (showNearbySheet) {
         PureNearbyUsersBottomSheet(
-            nearbyUsers = nearbyUsers.map { it.toPureUser() },
+            nearbyUsers = pureNearbyUsers,
             friends = pureFriends,
             pendingRequestEmails = pendingRequestEmails,
+            currentUser = currentUser?.toPureUser(),
+            limitStatusText = "⚡ Find Friend Active • Discover Peers",
             isLoading = nearbyLoading,
             errorMessage = nearbyError,
             onDismiss = { showNearbySheet = false },
@@ -155,7 +193,7 @@ fun ChatScreen(
                         requestError = null
                         chatRepository.sendFriendRequest(user.email)
                         pendingRequestEmails = pendingRequestEmails + user.email.trim().lowercase()
-                        Toast.makeText(context, "Friend request sent", Toast.LENGTH_SHORT).show()
+                        Toast.makeText(context, "Friend request sent to ${user.name}", Toast.LENGTH_SHORT).show()
                     } catch (e: Exception) {
                         requestError = formatFriendRequestError(e.message)
                         Toast.makeText(context, requestError, Toast.LENGTH_SHORT).show()
@@ -175,6 +213,20 @@ fun ChatScreen(
             refreshButtonText = refreshButtonText,
             refreshStatusText = refreshStatusText,
             isRefreshEnabled = !nearbyLoading,
+            onMessageFriend = { user ->
+                showNearbySheet = false
+                scope.launch {
+                    val myUid = currentUser?.uid.orEmpty()
+                    val chatId = chatRepository.getChatId(myUid, user.uid)
+                    onMessagePrivately(chatId, user.uid, user.name, user.profilePicUrl)
+                }
+            },
+            onOpenUrl = { url ->
+                runCatching {
+                    val intent = android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(url))
+                    context.startActivity(intent)
+                }
+            },
             renderImage = { url, modifier, scale -> AppAsyncImage(model = url, contentDescription = null, modifier = modifier, contentScale = scale) }
         )
     }
@@ -245,6 +297,31 @@ fun ChatScreen(
         onNewChatClick = { showNewChatDialog = true },
         onChatLongClick = { chat -> chatToDelete = chat; showDeleteDialog = true },
         searchQuery = searchQuery,
+        onMessagePrivately = { senderUid, senderName ->
+            scope.launch {
+                runCatching {
+                    if (!chatRepository.isFriend(senderUid)) {
+                        Toast.makeText(context, "Add this user as a friend first to message them", Toast.LENGTH_SHORT).show()
+                        return@launch
+                    }
+                    val chatId = chatRepository.createChatForFriend(senderUid, senderName)
+                    val profile = chatRepository.lookupUser(senderUid)
+                    onMessagePrivately(
+                        chatId,
+                        senderUid,
+                        profile?.name ?: senderName,
+                        profile?.profilePicUrl
+                    )
+                }.onFailure { error ->
+                    Toast.makeText(
+                        context,
+                        error.message ?: "Could not start private chat",
+                        Toast.LENGTH_SHORT
+                    ).show()
+                }
+            }
+        },
+        formatTime = { timestamp -> com.example.maps123.utils.DateUtils.formatChatTime(timestamp) },
         renderImage = { url, modifier, scale -> AppAsyncImage(model = url, contentDescription = null, modifier = modifier, contentScale = scale) }
     )
 }

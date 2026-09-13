@@ -5,7 +5,7 @@ import com.example.maps123.data.local.FriendRequestEntity
 import com.example.shared.model.PureUser
 import com.example.shared.model.PureFriendRequest
 
-fun UserEntity.toPureUser() = PureUser(
+fun UserEntity.toPureUser(distanceMeters: Double? = null) = PureUser(
     uid = uid,
     email = email,
     name = name,
@@ -15,7 +15,14 @@ fun UserEntity.toPureUser() = PureUser(
     course = course,
     dob = dob,
     profilePicUrl = profilePicUrl,
-    lastUpdated = lastUpdated
+    lastUpdated = lastUpdated,
+    location = if (latitude != 0.0 && longitude != 0.0) com.example.shared.GeoPoint(latitude, longitude) else null,
+    university = university,
+    instagramLink = instagramLink,
+    snapchatLink = snapchatLink,
+    linkedinLink = linkedinLink,
+    distanceMeters = distanceMeters,
+    ghostMode = ghostMode
 )
 
 fun FriendRequestEntity.toPureFriendRequest() = PureFriendRequest(

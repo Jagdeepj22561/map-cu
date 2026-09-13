@@ -20,6 +20,9 @@ interface AnnouncementDao {
     @Query("SELECT * FROM cached_announcements WHERE id = :id LIMIT 1")
     suspend fun getById(id: String): AnnouncementCacheEntity?
 
+    @Query("SELECT MAX(timestamp) FROM cached_announcements")
+    suspend fun getLatestTimestamp(): Long?
+
     @Query("SELECT MAX(timestamp) FROM cached_announcements WHERE authorUid = :authorUid")
     suspend fun getLatestTimestampByAuthor(authorUid: String): Long?
 

@@ -127,7 +127,6 @@ dependencies {
 
     // Maps
     implementation("com.google.android.gms:play-services-maps:19.0.0")
-    implementation("com.google.android.gms:play-services-location:21.0.1")
     implementation("com.google.maps.android:maps-compose:4.4.1")
 
     // Retrofit & OkHttp
@@ -141,8 +140,8 @@ dependencies {
     implementation("io.github.jan-tennert.supabase:realtime-kt")
     implementation("io.github.jan-tennert.supabase:storage-kt")
 
-    // Ktor client for Android
-    implementation("io.ktor:ktor-client-android:3.0.3")
+    // Ktor client
+    implementation("io.ktor:ktor-client-cio:3.0.3")
     // Testing
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)

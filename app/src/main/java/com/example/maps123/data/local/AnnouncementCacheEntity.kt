@@ -34,6 +34,7 @@ data class AnnouncementCacheEntity(
     val eventMaxMembers: Int? = null,
     val eventDepartments: String? = null,
     val eventLink: String? = null,
+    val eventCategory: String? = null,
     val cachedAt: Long = System.currentTimeMillis()
 )
 
@@ -70,7 +71,8 @@ fun AnnouncementCacheEntity.toAnnouncement(): Announcement {
         eventMode = eventMode,
         eventMaxMembers = eventMaxMembers,
         eventDepartments = eventDepartments,
-        eventLink = eventLink
+        eventLink = eventLink,
+        eventCategory = eventCategory
     )
 }
 
@@ -101,6 +103,7 @@ fun Announcement.toCacheEntity(cachedAt: Long = System.currentTimeMillis()): Ann
         eventMaxMembers = eventMaxMembers,
         eventDepartments = eventDepartments,
         eventLink = eventLink,
+        eventCategory = eventCategory,
         cachedAt = cachedAt
     )
 

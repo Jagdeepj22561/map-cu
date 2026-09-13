@@ -35,6 +35,7 @@ fun PureAnnouncementsScreen(
     isLoading: Boolean,
     currentUser: PureUser?,
     onAnnouncementClick: (String) -> Unit,
+    onOpenTeamsClick: ((String) -> Unit)? = null,
     onCreatePostClick: () -> Unit,
     onContactAuthor: (Announcement) -> Unit,
     onReport: (Announcement) -> Unit,
@@ -192,6 +193,10 @@ fun PureAnnouncementsScreen(
                             commentCount = commentCount(announcement),
                             onContactAuthor = { onContactAuthor(announcement) },
                             onClick = { onAnnouncementClick(announcement.id) },
+                            onCreateTeamClick = {
+                                if (onOpenTeamsClick != null) onOpenTeamsClick(announcement.id)
+                                else onAnnouncementClick(announcement.id)
+                            },
                             formatTime = formatTime,
                             renderImage = renderImage
                         )

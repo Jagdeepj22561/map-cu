@@ -28,7 +28,7 @@ import androidx.compose.runtime.getValue
 import com.example.maps123.ui.screens.UpdatePasswordDialog
 
 @Composable
-fun RootNavigation(viewModel: MainViewModel) {
+fun RootNavigation(viewModel: MainViewModel, pendingChatId: String? = null) {
     val context = LocalContext.current
     val sessionManager = remember(context) { SessionManager(context) }
     val scope = rememberCoroutineScope()
@@ -92,6 +92,7 @@ fun RootNavigation(viewModel: MainViewModel) {
             HomeScreen(
                 viewModel = viewModel,
                 isGuest = sessionManager.isGuestSession(),
+                pendingChatId = pendingChatId,
                 onLoginRequested = {
                     scope.launch {
                         sessionManager.clearSession()

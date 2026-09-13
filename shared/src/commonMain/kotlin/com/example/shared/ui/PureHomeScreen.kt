@@ -1,6 +1,6 @@
 package com.example.shared.ui
 
-import androidx.compose.foundation.clickable
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -10,12 +10,11 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 
-enum class PureAppScreen { MAP, CHAT, ANNOUNCEMENTS, GROUPS, FRIENDS, SETTINGS, PROFILE, FRIEND_PROFILE, ANNOUNCEMENT_DETAIL }
+enum class PureAppScreen { MAP, CHAT, ANNOUNCEMENTS, EVENTS, GROUPS, FRIENDS, SETTINGS, PROFILE, FRIEND_PROFILE, ANNOUNCEMENT_DETAIL, SEARCH }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -59,6 +58,7 @@ fun PureHomeScreen(
                                         PureAppScreen.MAP -> "Campus map"
                                         PureAppScreen.CHAT -> "Your conversations"
                                         PureAppScreen.ANNOUNCEMENTS -> "Campus community"
+                                        PureAppScreen.EVENTS -> "Discover events & hackathons"
                                         else -> ""
                                     },
                                     style = MaterialTheme.typography.labelSmall,
@@ -79,24 +79,29 @@ fun PureHomeScreen(
             }
         },
         bottomBar = {
-            if (showBars) Surface(color = MaterialTheme.colorScheme.background, tonalElevation = 2.dp) {
-                Box(Modifier.fillMaxWidth().navigationBarsPadding().padding(horizontal = 14.dp, vertical = 10.dp)) {
-                    Surface(
-                        modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(24.dp),
-                        color = MaterialTheme.colorScheme.surface,
-                        tonalElevation = 4.dp,
-                        shadowElevation = 8.dp
+            if (showBars) Box(
+                Modifier.fillMaxWidth().navigationBarsPadding().padding(bottom = 12.dp),
+                contentAlignment = Alignment.BottomCenter
+            ) {
+                Surface(
+                    shape = RoundedCornerShape(28.dp),
+                    color = MaterialTheme.colorScheme.surface.copy(alpha = 0.86f),
+                    border = BorderStroke(
+                        1.dp,
+                        MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f)
+                    ),
+                    shadowElevation = 10.dp,
+                    tonalElevation = 3.dp
+                ) {
+                    Row(
+                        Modifier.padding(horizontal = 6.dp, vertical = 6.dp),
+                        horizontalArrangement = Arrangement.spacedBy(2.dp),
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Row(
-                            Modifier.fillMaxWidth().padding(horizontal = 6.dp, vertical = 7.dp),
-                            horizontalArrangement = Arrangement.SpaceEvenly,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            PureDockItem("Map", Icons.Default.Place, currentScreen == PureAppScreen.MAP) { onScreenSelected(PureAppScreen.MAP) }
-                            PureDockItem("Chat", Icons.AutoMirrored.Filled.Chat, currentScreen == PureAppScreen.CHAT, unreadMessageCount) { onScreenSelected(PureAppScreen.CHAT) }
-                            PureDockItem("News", Icons.Default.Notifications, currentScreen == PureAppScreen.ANNOUNCEMENTS, newAnnouncementCount) { onScreenSelected(PureAppScreen.ANNOUNCEMENTS) }
-                        }
+                        PureDockItem("Map", Icons.Default.Place, currentScreen == PureAppScreen.MAP) { onScreenSelected(PureAppScreen.MAP) }
+                        PureDockItem("Chat", Icons.AutoMirrored.Filled.Chat, currentScreen == PureAppScreen.CHAT, unreadMessageCount) { onScreenSelected(PureAppScreen.CHAT) }
+                        PureDockItem("News", Icons.Default.Notifications, currentScreen == PureAppScreen.ANNOUNCEMENTS, newAnnouncementCount) { onScreenSelected(PureAppScreen.ANNOUNCEMENTS) }
+                        PureDockItem("Search", Icons.Default.Search, currentScreen == PureAppScreen.SEARCH) { onScreenSelected(PureAppScreen.SEARCH) }
                     }
                 }
             }
@@ -106,22 +111,36 @@ fun PureHomeScreen(
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun PureDockItem(label: String, icon: ImageVector, selected: Boolean, badgeCount: Int = 0, onClick: () -> Unit) {
-    val color = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
-    val container = if (selected) MaterialTheme.colorScheme.primaryContainer else Color.Transparent
-    Column(
-        modifier = Modifier.width(80.dp).clickable(onClick = onClick).padding(vertical = 1.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(3.dp)
-    ) {
-        Surface(shape = RoundedCornerShape(16.dp), color = container, modifier = Modifier.size(width = 56.dp, height = 34.dp)) {
-            Box(contentAlignment = Alignment.Center) {
+    val shape = RoundedCornerShape(22.dp)
+    if (selected) {
+        Surface(
+            onClick = onClick,
+            shape = shape,
+            color = MaterialTheme.colorScheme.primary,
+            modifier = Modifier.height(44.dp)
+        ) {
+            Row(
+                Modifier.padding(horizontal = 16.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(7.dp)
+            ) {
                 BadgedBox(badge = { if (badgeCount > 0) Badge { Text(if (badgeCount > 99) "99+" else "$badgeCount") } }) {
-                    Icon(icon, contentDescription = label, tint = color, modifier = Modifier.size(22.dp))
+                    Icon(icon, label, tint = MaterialTheme.colorScheme.onPrimary, modifier = Modifier.size(20.dp))
                 }
+                Text(label, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onPrimary, fontWeight = FontWeight.SemiBold)
             }
         }
-        Text(label, style = MaterialTheme.typography.labelSmall, color = color, fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium)
+    } else {
+        IconButton(
+            onClick = onClick,
+            modifier = Modifier.size(44.dp)
+        ) {
+            BadgedBox(badge = { if (badgeCount > 0) Badge { Text(if (badgeCount > 99) "99+" else "$badgeCount") } }) {
+                Icon(icon, label, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(22.dp))
+            }
+        }
     }
 }

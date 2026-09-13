@@ -36,16 +36,18 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    private var pendingDeepLinkChatId: String? = null
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         Log.d("DEBUG_MAIN", "onCreate CALLED")
 
         askNotificationPermission()
 
-        // Initialize TTS
+        pendingDeepLinkChatId = intent.getStringExtra("deep_link_chat_id")
+
         ttsEngine = TextToSpeech(this) { status ->
             if (status == TextToSpeech.SUCCESS) {
-                // Pass to ViewModel's wrapper
                 viewModel.setVoiceGuide(VoiceGuideWrapper(ttsEngine))
             }
         }
@@ -53,8 +55,12 @@ class MainActivity : ComponentActivity() {
         handleSupabaseDeepLink(intent)
 
         setContent {
-            RootNavigation(viewModel = viewModel)
+            RootNavigation(viewModel = viewModel, pendingChatId = pendingDeepLinkChatId)
         }
+    }
+
+    fun consumeDeepLinkChatId() {
+        pendingDeepLinkChatId = null
     }
 
     override fun onDestroy() {

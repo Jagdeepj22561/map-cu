@@ -31,6 +31,11 @@ object BitmapUtils {
             when (category) {
                 PlaceCategory.HOSTEL -> "🛏️"
                 PlaceCategory.GATE -> "⛩️"
+                PlaceCategory.ATM -> "🏧"
+                PlaceCategory.CAFETERIA -> "☕"
+                PlaceCategory.PARKING -> "🅿️"
+                PlaceCategory.LIBRARY -> "📚"
+                PlaceCategory.LAB -> "🔬"
                 else -> "📍"
             }
         } else ""
