@@ -1,6 +1,7 @@
 package com.example.shared.repository
 
 import com.example.shared.data.SupabaseClientProvider
+import com.example.shared.data.EventNotificationClient
 import com.example.shared.model.Announcement
 import com.example.shared.model.AnnouncementType
 import io.github.jan.supabase.postgrest.from
@@ -114,6 +115,7 @@ class AnnouncementRepository : IAnnouncementRepository {
                 authorProfilePicUrl = announcement.authorProfilePicUrl
             )
         )
+        EventNotificationClient.dispatch("post_created", announcement.id)
     }
 
     override suspend fun incrementViewCount(announcementId: String) {

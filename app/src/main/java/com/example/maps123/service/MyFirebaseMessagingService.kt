@@ -26,10 +26,32 @@ class MyFirebaseMessagingService : FirebaseMessagingService() {
 
         val data = remoteMessage.data
         if (data["kind"] == "custom_chat") {
-            if (data["recipientId"] != com.example.maps123.data.repository.AuthRepository.currentUserId()) return
+            // Broadcast posts have no per-user recipient id; targeted team
+            // updates do, and must match the signed-in account.
+            data["recipientId"]?.let { recipientId ->
+                if (recipientId != com.example.maps123.data.repository.AuthRepository.currentUserId()) return
+            }
             data["deep_link_chat_id"]?.let {
                 showChatNotification(it, "New message", "Open Campus Map to read your message")
             }
+            return
+        }
+        if (data["kind"] in setOf(
+                "post_created",
+                "team_join_requested",
+                "team_join_approved",
+                "team_join_rejected",
+                "team_member_joined"
+            )
+        ) {
+            if (data["recipientId"] != com.example.maps123.data.repository.AuthRepository.currentUserId()) return
+            val postId = data["deep_link_post_id"] ?: return
+            showCampusNotification(
+                notificationId = "$postId:${data["kind"]}".hashCode(),
+                postId = postId,
+                title = remoteMessage.notification?.title ?: "Campus Map update",
+                body = remoteMessage.notification?.body ?: "Open Campus Map to view the update"
+            )
             return
         }
         val chatId = data["chatId"]
@@ -99,6 +121,48 @@ class MyFirebaseMessagingService : FirebaseMessagingService() {
 
         val notificationId = chatId.hashCode()
         notificationManager.notify(notificationId, notification)
+    }
+
+    private fun showCampusNotification(notificationId: Int, postId: String, title: String, body: String) {
+        val channelId = "campus_updates"
+        val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            notificationManager.createNotificationChannel(
+                NotificationChannel(
+                    channelId,
+                    "Campus updates",
+                    NotificationManager.IMPORTANCE_HIGH
+                ).apply {
+                    description = "Posts and team activity"
+                    enableVibration(true)
+                }
+            )
+        }
+
+        val intent = Intent(this, MainActivity::class.java).apply {
+            flags = Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
+            putExtra("deep_link_post_id", postId)
+        }
+        val pendingIntent = PendingIntent.getActivity(
+            this,
+            notificationId,
+            intent,
+            PendingIntent.FLAG_ONE_SHOT or PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+        )
+        notificationManager.notify(
+            notificationId,
+            NotificationCompat.Builder(this, channelId)
+                .setSmallIcon(android.R.drawable.ic_dialog_info)
+                .setContentTitle(title)
+                .setContentText(body)
+                .setStyle(NotificationCompat.BigTextStyle().bigText(body))
+                .setAutoCancel(true)
+                .setContentIntent(pendingIntent)
+                .setPriority(NotificationCompat.PRIORITY_HIGH)
+                .setCategory(NotificationCompat.CATEGORY_SOCIAL)
+                .build()
+        )
     }
 
     private fun insertMessageLocally(

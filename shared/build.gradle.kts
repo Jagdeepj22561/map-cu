@@ -28,6 +28,7 @@ buildkonfig {
     defaultConfigs {
         buildConfigField(STRING, "SUPABASE_URL", publicProperty("SUPABASE_URL"))
         buildConfigField(STRING, "SUPABASE_PUBLISHABLE_KEY", publicProperty("SUPABASE_PUBLISHABLE_KEY"))
+        buildConfigField(STRING, "BACKEND_URL", publicProperty("BACKEND_URL"))
     }
 }
 

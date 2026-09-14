@@ -25,10 +25,15 @@ import androidx.compose.runtime.rememberCoroutineScope
 import kotlinx.coroutines.launch
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.LaunchedEffect
 import com.example.maps123.ui.screens.UpdatePasswordDialog
 
 @Composable
-fun RootNavigation(viewModel: MainViewModel, pendingChatId: String? = null) {
+fun RootNavigation(
+    viewModel: MainViewModel,
+    pendingChatId: String? = null,
+    pendingPostId: String? = null
+) {
     val context = LocalContext.current
     val sessionManager = remember(context) { SessionManager(context) }
     val scope = rememberCoroutineScope()
@@ -38,6 +43,13 @@ fun RootNavigation(viewModel: MainViewModel, pendingChatId: String? = null) {
         "home"
     } else {
         "login"
+    }
+
+    LaunchedEffect(pendingPostId) {
+        if (!pendingPostId.isNullOrBlank() && sessionManager.hasActiveSession()) {
+            navController.navigate("post/$pendingPostId") { launchSingleTop = true }
+            (context as? MainActivity)?.consumeDeepLinkPostId()
+        }
     }
 
     NavHost(

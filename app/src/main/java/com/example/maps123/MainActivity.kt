@@ -40,6 +40,7 @@ class MainActivity : ComponentActivity() {
     }
 
     private var pendingDeepLinkChatId by mutableStateOf<String?>(null)
+    private var pendingDeepLinkPostId by mutableStateOf<String?>(null)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -48,6 +49,7 @@ class MainActivity : ComponentActivity() {
         askNotificationPermission()
 
         pendingDeepLinkChatId = intent.getStringExtra("deep_link_chat_id")
+        pendingDeepLinkPostId = intent.getStringExtra("deep_link_post_id")
 
         ttsEngine = TextToSpeech(this) { status ->
             if (status == TextToSpeech.SUCCESS) {
@@ -58,12 +60,20 @@ class MainActivity : ComponentActivity() {
         handleSupabaseDeepLink(intent)
 
         setContent {
-            RootNavigation(viewModel = viewModel, pendingChatId = pendingDeepLinkChatId)
+            RootNavigation(
+                viewModel = viewModel,
+                pendingChatId = pendingDeepLinkChatId,
+                pendingPostId = pendingDeepLinkPostId
+            )
         }
     }
 
     fun consumeDeepLinkChatId() {
         pendingDeepLinkChatId = null
+    }
+
+    fun consumeDeepLinkPostId() {
+        pendingDeepLinkPostId = null
     }
 
     override fun onDestroy() {
@@ -90,6 +100,7 @@ class MainActivity : ComponentActivity() {
         super.onNewIntent(intent)
         setIntent(intent)
         pendingDeepLinkChatId = intent.getStringExtra("deep_link_chat_id")
+        pendingDeepLinkPostId = intent.getStringExtra("deep_link_post_id")
         handleSupabaseDeepLink(intent)
     }
 

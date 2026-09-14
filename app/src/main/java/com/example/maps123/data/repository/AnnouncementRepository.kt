@@ -7,6 +7,7 @@ import com.example.maps123.data.local.AppDatabase
 import com.example.maps123.data.local.toAnnouncement
 import com.example.maps123.data.local.toCacheEntity
 import com.example.maps123.data.supabase.SupabaseProvider
+import com.example.shared.data.EventNotificationClient
 import com.example.shared.model.Announcement
 import com.example.shared.model.AnnouncementType
 import io.github.jan.supabase.postgrest.from
@@ -185,6 +186,7 @@ class AnnouncementRepository(context: Context) {
             }
         }
         dao.insert(announcement.toCacheEntity())
+        EventNotificationClient.dispatch("post_created", announcement.id)
     }
 
     suspend fun deleteAnnouncement(announcementId: String) {

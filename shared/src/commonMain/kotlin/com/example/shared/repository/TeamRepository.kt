@@ -1,6 +1,7 @@
 package com.example.shared.repository
 
 import com.example.shared.data.SupabaseClientProvider
+import com.example.shared.data.EventNotificationClient
 import com.example.shared.model.FriendSuggestion
 import com.example.shared.model.TeamRequirement
 import io.github.jan.supabase.auth.auth
@@ -74,6 +75,7 @@ class TeamRepository {
     suspend fun joinTeam(teamId: String) {
         val uid = client.auth.currentUserOrNull()?.id ?: error("Login required")
         client.from("event_team_members").insert(MemberInsert(teamId, uid))
+        EventNotificationClient.dispatch("team_member_joined", teamId)
     }
 
     suspend fun createTeamRequirement(announcementId: String, content: String, membersNeeded: Int) {
@@ -376,6 +378,16 @@ class TeamRepository {
             }
             error(friendly)
         }
+        // The server uses this immutable request id to verify that the caller
+        // owns a still-pending request before it notifies the team owner.
+        val createdRequest = client.from("join_requests").select {
+            filter { eq("team_id", teamId); eq("requester_id", uid); eq("status", "pending") }
+            order("created_at", Order.DESCENDING)
+            limit(1)
+        }.decodeList<JoinRequestRow>().firstOrNull()
+        if (createdRequest != null) {
+            EventNotificationClient.dispatch("team_join_requested", createdRequest.id)
+        }
     }
 
     suspend fun getJoinRequestsForTeam(teamId: String): List<com.example.shared.model.JoinRequest> {
@@ -410,7 +422,10 @@ class TeamRepository {
         val rpcResult = runCatching {
             client.postgrest.rpc("approve_join_request", RequestIdParam(requestId))
         }
-        if (rpcResult.isSuccess) return
+        if (rpcResult.isSuccess) {
+            EventNotificationClient.dispatch("team_join_approved", requestId)
+            return
+        }
 
         // Fallback: direct table operations
         val request = client.from("join_requests").select {
@@ -432,6 +447,7 @@ class TeamRepository {
                 throw err
             }
         }
+        EventNotificationClient.dispatch("team_join_approved", requestId)
     }
 
     suspend fun rejectJoinRequest(requestId: String) {
@@ -439,12 +455,16 @@ class TeamRepository {
         val rpcResult = runCatching {
             client.postgrest.rpc("reject_join_request", RequestIdParam(requestId))
         }
-        if (rpcResult.isSuccess) return
+        if (rpcResult.isSuccess) {
+            EventNotificationClient.dispatch("team_join_rejected", requestId)
+            return
+        }
 
         client.from("join_requests").update({
             set("status", "rejected")
             set("reviewed_by", uid)
         }) { filter { eq("id", requestId) } }
+        EventNotificationClient.dispatch("team_join_rejected", requestId)
     }
 
     suspend fun withdrawJoinRequest(requestId: String) {
