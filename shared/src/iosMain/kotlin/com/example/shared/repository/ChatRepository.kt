@@ -303,8 +303,14 @@ private object IosChatStore {
     suspend fun createChatForFriend(friendUid: String, friendName: String): String {
         require(friendUid.isNotBlank()) { "Friend UID cannot be empty" }
         val uid = currentUid() ?: throw Exception("Not logged in")
-        val chatId = getChatId(uid, friendUid)
-        val existing = chats.value.firstOrNull { it.chatId == chatId }
+        val canonicalChatId = getChatId(uid, friendUid)
+        val legacyChatId = legacyChatId(uid, friendUid)
+        // Preserve conversations created by the old iOS-only underscore
+        // algorithm. New conversations use the cross-platform UUID contract.
+        val existing = chats.value.firstOrNull {
+            it.chatId == canonicalChatId || it.chatId == legacyChatId
+        }
+        val chatId = existing?.chatId ?: canonicalChatId
         val friend = IosUserStore.getUser(friendUid)
         val now = currentTimeMillis()
         val chatSummary = existing ?: PureChat(
@@ -1147,6 +1153,10 @@ private object IosChatStore {
     private fun currentUid(): String? = IosSessionStore.current()?.uid
 
     private fun getChatId(myUid: String, friendUid: String): String {
+        return directChatId(myUid, friendUid)
+    }
+
+    private fun legacyChatId(myUid: String, friendUid: String): String {
         return if (myUid < friendUid) "${myUid}_$friendUid" else "${friendUid}_$myUid"
     }
 
@@ -1230,9 +1240,9 @@ private object IosChatStore {
     }
 }
 
-actual class ChatRepository : IChatRepository {
+class ChatRepository : IChatRepository {
     override val allChats: Flow<List<PureChat>> = IosChatStore.chats
-    override val allGroups: Flow<List<PureGroup>> = IosChatStore.groups
+    val allGroups: Flow<List<PureGroup>> = IosChatStore.groups
 
     val friends: StateFlow<List<PureUser>> = IosChatStore.friends
     val friendRequests: StateFlow<List<PureFriendRequest>> = IosChatStore.friendRequests
@@ -1249,7 +1259,7 @@ actual class ChatRepository : IChatRepository {
     override suspend fun createChatForFriend(friendUid: String, friendName: String): String =
         IosChatStore.createChatForFriend(friendUid, friendName)
 
-    override suspend fun createGroup(name: String, memberUids: List<String>, iconUrl: String?) {
+    suspend fun createGroup(name: String, memberUids: List<String>, iconUrl: String?) {
         IosChatStore.createGroup(name, memberUids, iconUrl)
     }
 
@@ -1261,7 +1271,7 @@ actual class ChatRepository : IChatRepository {
         IosChatStore.startSync()
     }
 
-    override fun listenToUserGroups() {
+    fun listenToUserGroups() {
         IosChatStore.startSync()
     }
 
@@ -1270,7 +1280,7 @@ actual class ChatRepository : IChatRepository {
     }
 
     override suspend fun getChatId(myUid: String, friendUid: String): String {
-        return if (myUid < friendUid) "${myUid}_$friendUid" else "${friendUid}_$myUid"
+        return directChatId(myUid, friendUid)
     }
 
     override fun getCurrentUserUid(): String? = IosSessionStore.current()?.uid

@@ -38,6 +38,11 @@ kotlin {
         compileSdk = 36
         minSdk = 24
 
+        // Run commonTest on the JVM as part of normal CI. Previously this
+        // project only configured device tests, so shared business rules had
+        // no executable host-side test target.
+        withHostTestBuilder {}.configure {}
+
         withDeviceTestBuilder {
             sourceSetTreeName = "test"
         }.configure {
@@ -133,4 +138,34 @@ kotlin {
             }
         }
     }
+}
+
+val verifyKmpArchitecture by tasks.registering {
+    group = "verification"
+    description = "Checks that commonMain contains portable code and repository interfaces, not platform implementations."
+    doLast {
+        val commonSource = project.file("src/commonMain/kotlin")
+        val violations = mutableListOf<String>()
+        commonSource.walkTopDown().filter { it.isFile && it.extension == "kt" }.forEach { source ->
+            source.readLines().forEachIndexed { index, line ->
+                val trimmed = line.trim()
+                if (Regex("expect\\s+class\\s+\\w*Repository").containsMatchIn(trimmed)) {
+                    violations += "${source.relativeTo(projectDir)}:${index + 1}: repositories must be common interfaces"
+                }
+                if (Regex("import\\s+(android\\.|java\\.|platform\\.|cocoapods\\.)").containsMatchIn(trimmed)) {
+                    violations += "${source.relativeTo(projectDir)}:${index + 1}: platform import in commonMain"
+                }
+                if (trimmed.startsWith("import com.google.firebase")) {
+                    violations += "${source.relativeTo(projectDir)}:${index + 1}: Firebase import in commonMain"
+                }
+            }
+        }
+        check(violations.isEmpty()) {
+            "KMP architecture violations:\n${violations.joinToString("\n")}"
+        }
+    }
+}
+
+tasks.matching { it.name == "check" }.configureEach {
+    dependsOn(verifyKmpArchitecture)
 }

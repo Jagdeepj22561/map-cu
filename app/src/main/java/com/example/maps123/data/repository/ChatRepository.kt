@@ -11,6 +11,7 @@ import com.example.shared.data.EventNotificationClient
 import com.example.shared.model.PureChat
 import com.example.shared.model.PureUser
 import com.example.shared.repository.IChatRepository
+import com.example.shared.repository.directChatId
 import io.github.jan.supabase.auth.auth
 import io.github.jan.supabase.postgrest.from
 import io.github.jan.supabase.postgrest.postgrest
@@ -327,9 +328,7 @@ class ChatRepository(private val context: Context) : IChatRepository {
     }
 
     override suspend fun getChatId(myUid: String, friendUid: String): String =
-        UUID.nameUUIDFromBytes(
-            listOf(myUid, friendUid).sorted().joinToString(":").toByteArray()
-        ).toString()
+        directChatId(myUid, friendUid)
 
     override suspend fun createChatForFriend(
         friendUid: String,
