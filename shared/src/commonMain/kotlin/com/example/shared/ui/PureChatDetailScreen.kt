@@ -66,7 +66,8 @@ fun PureChatDetailScreen(
     renderImage: @Composable (String?, Modifier, ContentScale) -> Unit,
     canEditMessage: (PureMessage) -> Boolean = { true },
     onLoadMore: (() -> Unit)? = null,
-    onImageClick: ((String) -> Unit)? = null
+    onImageClick: ((String) -> Unit)? = null,
+    canDeleteForEveryone: Boolean = true
 ) {
 
     val listState = rememberLazyListState()
@@ -82,7 +83,7 @@ fun PureChatDetailScreen(
     }
     val canEditSelected by remember(selectedMessages, myUid) {
         derivedStateOf {
-            selectedMessages.size == 1 && selectedMessages.firstOrNull()?.senderId == myUid
+            selectedMessages.size == 1 && selectedMessages.firstOrNull()?.senderId == myUid && canEditMessage(selectedMessages.first())
         }
     }
 
@@ -430,7 +431,7 @@ fun PureChatDetailScreen(
             confirmButton = {
                 TextButton(
                     onClick = {
-                        val deleteForEveryone = selectedMessages.isNotEmpty() &&
+                        val deleteForEveryone = canDeleteForEveryone && selectedMessages.isNotEmpty() &&
                             selectedMessages.all { it.senderId == myUid }
                         onDeleteMessages(selectedMessageIds, deleteForEveryone)
                         selectedMessageIds = emptySet()
@@ -448,7 +449,9 @@ fun PureChatDetailScreen(
             title = { Text("Delete selected messages?") },
             text = {
                 Text(
-                    if (selectedMessages.all { it.senderId == myUid }) {
+                    if (!canDeleteForEveryone) {
+                        "Only your local copy will be removed. A message already accepted by the server may still be delivered."
+                    } else if (selectedMessages.all { it.senderId == myUid }) {
                         "Selected messages will be removed."
                     } else {
                         "Only your local copy will be removed for messages sent by others."
@@ -675,7 +678,10 @@ fun PureMessageBubble(
                                 style = MaterialTheme.typography.labelSmall,
                                 color = timeColor
                             )
-                            if (isMe) {
+                            if (isMe && message.deliveryLabel != null) {
+                                Spacer(Modifier.width(4.dp))
+                                Text(message.deliveryLabel, style = MaterialTheme.typography.labelSmall, color = timeColor)
+                            } else if (isMe) {
                                 Spacer(Modifier.width(4.dp))
                                 Icon(
                                     imageVector = if (message.isRead) Icons.Default.DoneAll else Icons.Default.Done,

@@ -53,6 +53,13 @@ private val MIGRATION_29_30 = object : Migration(29, 30) {
     override fun migrate(db: SupportSQLiteDatabase) { /* reserved */ }
 }
 
+private val MIGRATION_30_31 = object : Migration(30, 31) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("ALTER TABLE messages ADD COLUMN customTransport INTEGER NOT NULL DEFAULT 0")
+        db.execSQL("ALTER TABLE messages ADD COLUMN customFailure TEXT DEFAULT NULL")
+    }
+}
+
 @Database(
     entities = [
         RouteEntity::class,
@@ -63,7 +70,7 @@ private val MIGRATION_29_30 = object : Migration(29, 30) {
         MessageEntity::class,
         FriendRequestEntity::class
     ],
-    version = 30
+    version = 31
 )
 abstract class AppDatabase : RoomDatabase() {
 
@@ -108,7 +115,7 @@ abstract class AppDatabase : RoomDatabase() {
                     AppDatabase::class.java,
                     dbName
                 )
-                    .addMigrations(MIGRATION_28_29, MIGRATION_29_30)
+                    .addMigrations(MIGRATION_28_29, MIGRATION_29_30, MIGRATION_30_31)
                     .fallbackToDestructiveMigration(true)
                     .fallbackToDestructiveMigrationOnDowngrade(true)
                     .build()
@@ -119,4 +126,3 @@ abstract class AppDatabase : RoomDatabase() {
         }
     }
 }
-

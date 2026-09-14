@@ -18,7 +18,8 @@ data class PureMessage(
     val timestamp: Long,
     val isRead: Boolean = false,
     val imageUrl: String? = null,
-    val type: String = "TEXT"
+    val type: String = "TEXT",
+    val deliveryLabel: String? = null
 )
 
 data class PureFriendRequest(

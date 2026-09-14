@@ -8,6 +8,11 @@ import kotlinx.coroutines.flow.Flow
 
 @Dao
 interface ChatDao {
+    @Query("SELECT * FROM messages WHERE customTransport = 1 AND customFailure IS NULL AND isSynced = 0 AND senderId = :uid AND timestamp > :since ORDER BY timestamp LIMIT 50")
+    suspend fun getCustomOutbox(uid: String, since: Long): List<MessageEntity>
+
+    @Query("UPDATE messages SET customFailure = :reason WHERE messageId = :id AND customTransport = 1 AND isSynced = 0")
+    suspend fun markCustomFailure(id: String, reason: String)
     // Chat List
     @Query("SELECT * FROM chats ORDER BY lastMessageTime DESC")
     fun getAllChats(): Flow<List<ChatEntity>>

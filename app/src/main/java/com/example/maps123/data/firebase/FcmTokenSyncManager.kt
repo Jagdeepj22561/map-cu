@@ -23,6 +23,7 @@ object FcmTokenSyncManager {
         val uid = AuthRepository.currentUserId() ?: return
         FirebaseMessaging.getInstance().token.addOnCompleteListener { task ->
             if (!task.isSuccessful) return@addOnCompleteListener
+            if (AuthRepository.currentUserId() != uid) return@addOnCompleteListener
             val token = task.result?.trim().orEmpty()
             if (token.isBlank()) return@addOnCompleteListener
             syncTokenIfChanged(context, uid, token)
@@ -39,6 +40,17 @@ object FcmTokenSyncManager {
         val lastUid = prefs.getString(keyLastUid, null)
         val lastToken = prefs.getString(keyLastToken, null)
         if (lastUid == uid && lastToken == token) return
+        // The old account owns its token row under RLS. Rotate instead of trying
+        // to transfer it while authenticated as a different account.
+        if (lastUid != null && lastUid != uid && lastToken == token) {
+            val rotationKey = "rotate:$uid"
+            synchronized(inFlightKeys) { if (!inFlightKeys.add(rotationKey)) return }
+            FirebaseMessaging.getInstance().deleteToken().addOnCompleteListener { task ->
+                synchronized(inFlightKeys) { inFlightKeys.remove(rotationKey) }
+                if (task.isSuccessful && AuthRepository.currentUserId() == uid) syncCurrentToken(context)
+            }
+            return
+        }
 
         val inFlightKey = "$uid:$token"
         synchronized(inFlightKeys) {
@@ -47,6 +59,7 @@ object FcmTokenSyncManager {
 
         scope.launch {
             try {
+                if (AuthRepository.currentUserId() != uid) return@launch
                 // FCM still delivers Android notifications; only the token's
                 // persistence moves from Firestore to Supabase.
                 val table = SupabaseProvider.client.from("device_tokens")
@@ -61,10 +74,15 @@ object FcmTokenSyncManager {
                 } else {
                     table.insert(DeviceTokenRow(token = token, userId = uid, platform = "android"))
                 }
+                if (AuthRepository.currentUserId() != uid) return@launch
                 prefs.edit()
                     .putString(keyLastUid, uid)
                     .putString(keyLastToken, token)
                     .apply()
+            } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                android.util.Log.w("FcmTokenSync", "Token registration failed; will retry on next foreground")
             } finally {
                 synchronized(inFlightKeys) { inFlightKeys.remove(inFlightKey) }
             }

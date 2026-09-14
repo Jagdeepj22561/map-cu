@@ -62,6 +62,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun initializeChat() {
         Log.d("DEBUG_VM", "initializeChat CALLED")
+        com.example.maps123.data.firebase.FcmTokenSyncManager.syncCurrentToken(getApplication())
         if (isChatInitialized) return
         isChatInitialized = true
 

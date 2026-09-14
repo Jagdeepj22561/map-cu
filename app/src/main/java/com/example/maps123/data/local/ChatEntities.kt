@@ -42,7 +42,9 @@ data class MessageEntity(
     val isRead: Boolean = false,
     val isSynced: Boolean = false,
     val imageUrl: String? = null,
-    val type: String = "TEXT"
+    val type: String = "TEXT",
+    @androidx.room.ColumnInfo(defaultValue = "0") val customTransport: Boolean = false,
+    @androidx.room.ColumnInfo(defaultValue = "NULL") val customFailure: String? = null
 ) {
     fun toPureMessage() = PureMessage(
         messageId = messageId,
@@ -52,7 +54,10 @@ data class MessageEntity(
         timestamp = timestamp,
         isRead = isRead,
         imageUrl = imageUrl,
-        type = type
+        type = type,
+        deliveryLabel = if (customTransport) {
+            customFailure ?: if (isSynced) "Accepted" else if (System.currentTimeMillis() - timestamp >= 72 * 60 * 60 * 1000L) "Not sent (expired)" else "Pending"
+        } else null
     )
 }
 @Entity(tableName = "friend_requests")

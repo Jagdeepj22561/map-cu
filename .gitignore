@@ -31,6 +31,11 @@ local.properties
 
 # Logs
 *.log
+node_modules/
+supabase/.temp/
+.env
+.env.*
+!.env.example
 
 # macOS
 .DS_Store

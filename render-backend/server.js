@@ -268,4 +268,24 @@ app.post("/upload-image", requireSupabaseUser, upload.single("file"), async (req
 });
 
 const port = process.env.PORT || 3000;
-app.listen(port, () => console.log(`Server running on port ${port}`));
+const server = require("node:http").createServer(app);
+if (process.env.CUSTOM_CHAT_ENABLED === "true") {
+  const { attachChatServer } = require("./chat-server");
+  const { createChatStore } = require("./chat-store");
+  const { createChatPush } = require("./chat-push");
+  const closeChat = attachChatServer(server, {
+    store: createChatStore(supabase),
+    notify: createChatPush(supabase),
+    enabledUsers: new Set((process.env.CHAT_PILOT_USER_IDS || "").split(",").map(id => id.trim()).filter(Boolean)),
+    authenticate: async token => {
+      const { data, error } = await supabase.auth.getUser(token);
+      if (error || !data?.user) return null;
+      // Read expiry only after Supabase has verified this token.
+      const claims = JSON.parse(Buffer.from(token.split(".")[1], "base64url").toString());
+      const expiresInMs = claims.exp * 1000 - Date.now();
+      return expiresInMs > 0 ? { id: data.user.id, expiresInMs } : null;
+    },
+  });
+  process.on("SIGTERM", () => { closeChat(); server.close(); });
+}
+server.listen(port, () => console.log(`Server running on port ${port}`));

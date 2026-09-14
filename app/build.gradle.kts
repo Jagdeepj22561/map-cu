@@ -38,6 +38,8 @@ android {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
         // Public client values only.  Keep SUPABASE_SERVICE_ROLE_KEY on Render.
+        buildConfigField("boolean", "USE_CUSTOM_CHAT_SERVER", (supabaseBuildProperty("USE_CUSTOM_CHAT_SERVER") == "true").toString())
+        buildConfigField("String", "CUSTOM_CHAT_SERVER_URL", asBuildConfigString(supabaseBuildProperty("CUSTOM_CHAT_SERVER_URL")))
         buildConfigField(
             "String",
             "SUPABASE_URL",

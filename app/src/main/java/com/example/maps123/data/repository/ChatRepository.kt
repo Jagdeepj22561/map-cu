@@ -3,6 +3,7 @@ package com.example.maps123.data.repository
 import android.content.Context
 import android.net.Uri
 import android.util.Log
+import androidx.room.withTransaction
 import com.example.maps123.data.local.*
 import com.example.maps123.data.supabase.SupabaseProvider
 import com.example.shared.GeoPoint
@@ -26,6 +27,8 @@ import java.util.UUID
 
 /** Supabase is the source of truth; Room remains the offline cache. */
 class ChatRepository(private val context: Context) : IChatRepository {
+    private val customChat = CustomChatClient(context.applicationContext)
+    private val useCustomChat get() = com.example.maps123.BuildConfig.USE_CUSTOM_CHAT_SERVER
 
     private val dao
         get() = AppDatabase.getInstance(context.applicationContext).chatDao()
@@ -370,6 +373,16 @@ class ChatRepository(private val context: Context) : IChatRepository {
     fun listenToFriendRequests() = startSync()
 
     override fun startSync() {
+        if (useCustomChat) {
+            customChat.start(scope)
+            if (syncJob?.isActive != true) syncJob = scope.launch {
+                while (isActive) {
+                    runCatching { refreshFriendRequestsNow(true) }
+                    delay(30_000)
+                }
+            }
+            return
+        }
         if (realtimeJob?.isActive == true) return
 
         realtimeJob = scope.launch {
@@ -522,6 +535,7 @@ class ChatRepository(private val context: Context) : IChatRepository {
     }
 
     fun stopSync() {
+        customChat.stop()
         realtimeJob?.cancel()
         realtimeJob = null
         syncJob?.cancel()
@@ -529,6 +543,16 @@ class ChatRepository(private val context: Context) : IChatRepository {
     }
 
     suspend fun refreshUserChatsNow(forceRefresh: Boolean = false) {
+        if (useCustomChat) {
+            // Server history is intentionally absent in this mode; preserve Room previews.
+            val friends = getFriendsImplementation(forceRefresh)
+            friends.forEach { friend ->
+                dao.getChat(getChatId(uid(), friend.uid))?.let { old ->
+                    dao.insertChat(old.copy(friendName = friend.name, friendProfilePicUrl = friend.profilePicUrl))
+                }
+            }
+            return
+        }
         val mine = uid()
 
         val friends = runCatching { getFriendsImplementation(forceRefresh) }.getOrElse { emptyList() }
@@ -634,7 +658,7 @@ class ChatRepository(private val context: Context) : IChatRepository {
         )
     }
 
-    fun setActiveChat(chatId: String?) { activeChatId = chatId }
+    fun setActiveChat(chatId: String?) { activeChatId = chatId; customChat.activeChatId = chatId }
 
     suspend fun sendMessage(
         chatId: String,
@@ -647,6 +671,23 @@ class ChatRepository(private val context: Context) : IChatRepository {
         lastMessageTime = now
 
         val mine = uid()
+        if (useCustomChat) {
+            require(chatId == getChatId(mine, friendUid)) { "Invalid conversation" }
+            require(content.isNotBlank() || imageUrl != null) { "Message cannot be empty" }
+            require(content.toByteArray().size <= 8000) { "Message is too long" }
+            val old = dao.getChat(chatId)
+            check(old?.isBlocked != true) { "Unblock this user to send messages" }
+            val message = MessageEntity(UUID.randomUUID().toString(), chatId, mine, content, now,
+                imageUrl = imageUrl, type = if (imageUrl == null) "TEXT" else "IMAGE", customTransport = true)
+            val db = AppDatabase.getInstance(context.applicationContext)
+            db.withTransaction {
+                dao.insertMessage(message)
+                dao.insertChat((old ?: ChatEntity(chatId, friendUid, "Friend", lastMessage = "", lastMessageTime = 0)).copy(
+                    lastMessage = if (imageUrl == null) content else "Image", lastMessageTime = now))
+            }
+            customChat.start(scope)
+            return
+        }
         createChatForFriend(friendUid, "")
 
         val row = MessageRow(
@@ -665,6 +706,7 @@ class ChatRepository(private val context: Context) : IChatRepository {
     }
 
     suspend fun fetchNewMessages(chatId: String) {
+        if (useCustomChat) { customChat.start(scope); return }
         val rows = SupabaseProvider.client
             .from("messages")
             .select {
@@ -680,6 +722,7 @@ class ChatRepository(private val context: Context) : IChatRepository {
     }
 
     suspend fun loadOlderMessages(chatId: String, beforeTimestamp: Long, limit: Int = 50): Boolean {
+        if (useCustomChat) return false
         val rows = SupabaseProvider.client
             .from("messages")
             .select {
@@ -725,6 +768,8 @@ class ChatRepository(private val context: Context) : IChatRepository {
     }
 
     fun clearAllListeners() {
+        customChat.stop()
+        customChat.activeChatId = null
         activeChatId = null
         syncJob?.cancel()
         syncJob = null
@@ -733,6 +778,7 @@ class ChatRepository(private val context: Context) : IChatRepository {
     }
 
     suspend fun rewriteLocalDataAndSync() {
+        check(!useCustomChat) { "Chat history is stored only on this device. Reset is unavailable in the chat pilot." }
         clearAllListeners()
         dao.deleteAllMessages()
         dao.deleteAllChats()
@@ -754,6 +800,10 @@ class ChatRepository(private val context: Context) : IChatRepository {
 
         val mine = uid()
         dao.getUnreadIncomingMessages(chatId, mine).forEach { message ->
+            if (useCustomChat) {
+                dao.updateMessageReadStatus(message.messageId, true)
+                return@forEach
+            }
             SupabaseProvider.client.from("messages").update({
                 set("read_at", "now()")
             }) {
@@ -797,6 +847,7 @@ class ChatRepository(private val context: Context) : IChatRepository {
         dao.deleteMessages(messageIds)
 
     suspend fun deleteMessagesForEveryone(chatId: String, messageIds: List<String>) {
+        check(!useCustomChat) { "Delete for everyone is unavailable in the chat pilot. You can delete locally." }
         SupabaseProvider.client.from("messages").delete {
             filter {
                 eq("chat_id", chatId)
@@ -808,6 +859,7 @@ class ChatRepository(private val context: Context) : IChatRepository {
     }
 
     suspend fun editMessage(chatId: String, messageId: String, newContent: String) {
+        check(!useCustomChat) { "Editing sent messages is unavailable in the chat pilot." }
         SupabaseProvider.client.from("messages").update({
             set("content", newContent.trim())
         }) {

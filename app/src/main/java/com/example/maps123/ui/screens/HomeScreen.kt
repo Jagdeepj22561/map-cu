@@ -209,9 +209,17 @@ fun HomeScreen(
     // Handle notification deep link to open specific chat
     LaunchedEffect(pendingChatId, friends) {
         if (pendingChatId != null && pendingChatId.isNotBlank() && friends.isNotEmpty()) {
-            val chat = runCatching {
+            var chat = runCatching {
                 AppDatabase.getInstance(context).chatDao().getChat(pendingChatId)
             }.getOrNull()
+            if (chat == null && com.example.maps123.BuildConfig.USE_CUSTOM_CHAT_SERVER) {
+                val mine = AuthRepository.currentUserId()
+                val friend = friends.firstOrNull { mine != null && chatRepository.getChatId(mine, it.uid) == pendingChatId }
+                if (friend != null) {
+                    chat = com.example.maps123.data.local.ChatEntity(pendingChatId, friend.uid, friend.name,
+                        friend.profilePicUrl, lastMessage = "", lastMessageTime = 0)
+                }
+            }
             
             if (chat != null) {
                 selectedChatId = pendingChatId
@@ -219,6 +227,7 @@ fun HomeScreen(
                 selectedFriendName = chat.friendName
                 selectedFriendPicUrl = chat.friendProfilePicUrl
                 currentScreen = PureAppScreen.CHAT
+                (context as? com.example.maps123.MainActivity)?.consumeDeepLinkChatId()
             }
         }
     }

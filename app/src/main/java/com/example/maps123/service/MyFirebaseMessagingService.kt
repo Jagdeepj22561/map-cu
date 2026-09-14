@@ -25,6 +25,13 @@ class MyFirebaseMessagingService : FirebaseMessagingService() {
         super.onMessageReceived(remoteMessage)
 
         val data = remoteMessage.data
+        if (data["kind"] == "custom_chat") {
+            if (data["recipientId"] != com.example.maps123.data.repository.AuthRepository.currentUserId()) return
+            data["deep_link_chat_id"]?.let {
+                showChatNotification(it, "New message", "Open Campus Map to read your message")
+            }
+            return
+        }
         val chatId = data["chatId"]
         val senderId = data["senderId"]
         val content = data["content"]

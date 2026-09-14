@@ -231,8 +231,9 @@ fun ChatDetailScreen(
             AppAsyncImage(model = url, contentDescription = null, modifier = modifier, contentScale = scale)
         },
         canEditMessage = { message ->
-            System.currentTimeMillis() - message.timestamp < 2 * 60 * 1000
+            !com.example.maps123.BuildConfig.USE_CUSTOM_CHAT_SERVER && System.currentTimeMillis() - message.timestamp < 2 * 60 * 1000
         },
+        canDeleteForEveryone = !com.example.maps123.BuildConfig.USE_CUSTOM_CHAT_SERVER,
         onLoadMore = loadMoreCallback,
         onImageClick = { imageUrl ->
             fullScreenImageUrl = imageUrl
