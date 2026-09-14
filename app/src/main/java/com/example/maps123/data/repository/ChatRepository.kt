@@ -7,6 +7,7 @@ import androidx.room.withTransaction
 import com.example.maps123.data.local.*
 import com.example.maps123.data.supabase.SupabaseProvider
 import com.example.shared.GeoPoint
+import com.example.shared.data.EventNotificationClient
 import com.example.shared.model.PureChat
 import com.example.shared.model.PureUser
 import com.example.shared.repository.IChatRepository
@@ -193,6 +194,23 @@ class ChatRepository(private val context: Context) : IChatRepository {
         SupabaseProvider.client
             .from("friend_requests")
             .insert(FriendRequestInsert(mine, target.id))
+
+        val createdRequest = SupabaseProvider.client
+            .from("friend_requests")
+            .select {
+                filter {
+                    eq("sender_id", mine)
+                    eq("receiver_id", target.id)
+                    eq("status", "pending")
+                }
+                order("created_at", Order.DESCENDING)
+                limit(1)
+            }
+            .decodeList<FriendRequestRow>()
+            .firstOrNull()
+        if (createdRequest != null) {
+            EventNotificationClient.dispatch("friend_request_created", createdRequest.id)
+        }
     }
 
     suspend fun refreshFriendRequestsNow(forceRefresh: Boolean = false) {
@@ -261,19 +279,34 @@ class ChatRepository(private val context: Context) : IChatRepository {
             )
 
         dao.deleteRequest(request.id)
+        EventNotificationClient.dispatch("friend_request_accepted", request.id)
         return user(senderUid)
     }
 
     suspend fun rejectFriendRequest(senderUid: String) {
+        val mine = uid()
+        val request = SupabaseProvider.client
+            .from("friend_requests")
+            .select {
+                filter {
+                    eq("sender_id", senderUid)
+                    eq("receiver_id", mine)
+                    eq("status", "pending")
+                }
+                limit(1)
+            }
+            .decodeList<FriendRequestRow>()
+            .firstOrNull()
+        if (request == null) {
+            refreshFriendRequestsNow(true)
+            return
+        }
         SupabaseProvider.client
             .from("friend_requests")
             .update({ set("status", "rejected") }) {
-                filter {
-                    eq("sender_id", senderUid)
-                    eq("receiver_id", uid())
-                    eq("status", "pending")
-                }
+                filter { eq("id", request.id) }
             }
+        EventNotificationClient.dispatch("friend_request_rejected", request.id)
         refreshFriendRequestsNow(true)
     }
 

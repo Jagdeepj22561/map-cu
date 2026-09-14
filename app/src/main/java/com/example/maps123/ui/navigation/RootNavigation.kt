@@ -32,7 +32,8 @@ import com.example.maps123.ui.screens.UpdatePasswordDialog
 fun RootNavigation(
     viewModel: MainViewModel,
     pendingChatId: String? = null,
-    pendingPostId: String? = null
+    pendingPostId: String? = null,
+    pendingOpenFriends: Boolean = false
 ) {
     val context = LocalContext.current
     val sessionManager = remember(context) { SessionManager(context) }
@@ -105,6 +106,7 @@ fun RootNavigation(
                 viewModel = viewModel,
                 isGuest = sessionManager.isGuestSession(),
                 pendingChatId = pendingChatId,
+                pendingOpenFriends = pendingOpenFriends,
                 onLoginRequested = {
                     scope.launch {
                         sessionManager.clearSession()

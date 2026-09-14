@@ -54,6 +54,21 @@ class MyFirebaseMessagingService : FirebaseMessagingService() {
             )
             return
         }
+        if (data["kind"] in setOf(
+                "friend_request_created",
+                "friend_request_accepted",
+                "friend_request_rejected"
+            )
+        ) {
+            if (data["recipientId"] != com.example.maps123.data.repository.AuthRepository.currentUserId()) return
+            showCampusNotification(
+                notificationId = "friends:${data["kind"]}:${data["requestId"]}".hashCode(),
+                openFriends = true,
+                title = remoteMessage.notification?.title ?: "Friend update",
+                body = remoteMessage.notification?.body ?: "Open Campus Map to view it"
+            )
+            return
+        }
         val chatId = data["chatId"]
         val senderId = data["senderId"]
         val content = data["content"]
@@ -123,7 +138,13 @@ class MyFirebaseMessagingService : FirebaseMessagingService() {
         notificationManager.notify(notificationId, notification)
     }
 
-    private fun showCampusNotification(notificationId: Int, postId: String, title: String, body: String) {
+    private fun showCampusNotification(
+        notificationId: Int,
+        postId: String? = null,
+        openFriends: Boolean = false,
+        title: String,
+        body: String
+    ) {
         val channelId = "campus_updates"
         val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
 
@@ -142,7 +163,8 @@ class MyFirebaseMessagingService : FirebaseMessagingService() {
 
         val intent = Intent(this, MainActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
-            putExtra("deep_link_post_id", postId)
+            postId?.let { putExtra("deep_link_post_id", it) }
+            if (openFriends) putExtra("deep_link_friends", "true")
         }
         val pendingIntent = PendingIntent.getActivity(
             this,

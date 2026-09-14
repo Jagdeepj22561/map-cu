@@ -1,5 +1,6 @@
 package com.example.maps123.ui.screens
 
+import com.example.maps123.MainActivity
 import android.Manifest
 import android.content.pm.PackageManager
 import android.widget.Toast
@@ -94,6 +95,7 @@ fun HomeScreen(
     viewModel: MainViewModel,
     isGuest: Boolean,
     pendingChatId: String? = null,
+    pendingOpenFriends: Boolean = false,
     onLoginRequested: () -> Unit,
     onLogout: () -> Unit
 ) {
@@ -120,6 +122,13 @@ fun HomeScreen(
     var currentUserLoadError by remember { mutableStateOf<String?>(null) }
     var showFriendManager by remember { mutableStateOf(false) }
     var pendingRequestEmails by remember { mutableStateOf<Set<String>>(emptySet()) }
+
+    LaunchedEffect(pendingOpenFriends, isGuest) {
+        if (pendingOpenFriends && !isGuest) {
+            showFriendManager = true
+            (context as? MainActivity)?.consumeOpenFriends()
+        }
+    }
 
     val userRepository = viewModel.userRepository
     val chatRepository = viewModel.chatRepository

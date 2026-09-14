@@ -21,8 +21,11 @@ class TeamRepository {
     @Serializable private data class MemberInsert(@SerialName("team_id") val teamId: String, @SerialName("user_id") val userId: String, val role: String = "member")
     @Serializable private data class FriendRequestInsert(@SerialName("sender_id") val senderId: String, @SerialName("receiver_id") val receiverId: String)
     @Serializable private data class FriendRequestRow(
+        val id: String,
         @SerialName("sender_id") val senderId: String,
-        @SerialName("receiver_id") val receiverId: String
+        @SerialName("receiver_id") val receiverId: String,
+        val status: String = "pending",
+        @SerialName("created_at") val createdAt: String = ""
     )
     @Serializable private data class DiscoveryParams(@SerialName("p_limit") val limit: Int)
     @Serializable private data class DiscoveryRow(@SerialName("user_id") val userId: String, val name: String, val email: String, @SerialName("profile_pic_url") val profilePicUrl: String = "", val course: String = "", val year: String = "", val semester: String = "", val score: Int = 0, val reasons: List<String> = emptyList())
@@ -196,6 +199,14 @@ class TeamRepository {
                 else -> msg.ifBlank { "Failed to send friend request." }
             }
             error(friendly)
+        }
+        val createdRequest = client.from("friend_requests").select {
+            filter { eq("sender_id", uid); eq("receiver_id", receiverId); eq("status", "pending") }
+            order("created_at", Order.DESCENDING)
+            limit(1)
+        }.decodeList<FriendRequestRow>().firstOrNull()
+        if (createdRequest != null) {
+            EventNotificationClient.dispatch("friend_request_created", createdRequest.id)
         }
     }
 

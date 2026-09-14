@@ -41,6 +41,7 @@ class MainActivity : ComponentActivity() {
 
     private var pendingDeepLinkChatId by mutableStateOf<String?>(null)
     private var pendingDeepLinkPostId by mutableStateOf<String?>(null)
+    private var pendingOpenFriends by mutableStateOf(false)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -50,6 +51,7 @@ class MainActivity : ComponentActivity() {
 
         pendingDeepLinkChatId = intent.getStringExtra("deep_link_chat_id")
         pendingDeepLinkPostId = intent.getStringExtra("deep_link_post_id")
+        pendingOpenFriends = intent.getStringExtra("deep_link_friends").toBoolean()
 
         ttsEngine = TextToSpeech(this) { status ->
             if (status == TextToSpeech.SUCCESS) {
@@ -63,7 +65,8 @@ class MainActivity : ComponentActivity() {
             RootNavigation(
                 viewModel = viewModel,
                 pendingChatId = pendingDeepLinkChatId,
-                pendingPostId = pendingDeepLinkPostId
+                pendingPostId = pendingDeepLinkPostId,
+                pendingOpenFriends = pendingOpenFriends
             )
         }
     }
@@ -74,6 +77,10 @@ class MainActivity : ComponentActivity() {
 
     fun consumeDeepLinkPostId() {
         pendingDeepLinkPostId = null
+    }
+
+    fun consumeOpenFriends() {
+        pendingOpenFriends = false
     }
 
     override fun onDestroy() {
@@ -101,6 +108,7 @@ class MainActivity : ComponentActivity() {
         setIntent(intent)
         pendingDeepLinkChatId = intent.getStringExtra("deep_link_chat_id")
         pendingDeepLinkPostId = intent.getStringExtra("deep_link_post_id")
+        pendingOpenFriends = intent.getStringExtra("deep_link_friends").toBoolean()
         handleSupabaseDeepLink(intent)
     }
 
