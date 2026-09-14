@@ -1,11 +1,37 @@
+const fs = require("node:fs");
+
+function firebaseCredentialJson() {
+  const environmentValue = process.env.FIREBASE_SERVICE_ACCOUNT_JSON
+    || process.env.FIREBASE_SERVICE_ACCOUNT
+    || process.env["Firebase service account"];
+  if (environmentValue) return environmentValue;
+  const candidates = [
+    process.env.FIREBASE_SERVICE_ACCOUNT_PATH,
+    "/etc/secrets/firebase-service-account.json",
+    "/etc/secrets/Firebase service account",
+  ].filter(Boolean);
+  for (const path of candidates) {
+    try { return fs.readFileSync(path, "utf8"); } catch (_) { /* try next configured path */ }
+  }
+  return null;
+}
+
+function hasChatPushConfig() {
+  try {
+    const json = firebaseCredentialJson();
+    return Boolean(json && JSON.parse(json).project_id && JSON.parse(json).private_key);
+  } catch (_) { return false; }
+}
+
 function createChatPush(db) {
-  if (!process.env.FIREBASE_SERVICE_ACCOUNT_JSON) {
+  const credentialJson = firebaseCredentialJson();
+  if (!credentialJson) {
     console.warn("Chat push disabled: FIREBASE_SERVICE_ACCOUNT_JSON is missing");
     return async () => {};
   }
   const { initializeApp, cert } = require("firebase-admin/app");
   const { getMessaging } = require("firebase-admin/messaging");
-  const firebase = initializeApp({ credential: cert(JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT_JSON)) }, "chat");
+  const firebase = initializeApp({ credential: cert(JSON.parse(credentialJson)) }, "chat");
   return async row => {
     const { data, error } = await db.from("device_tokens").select("token").eq("user_id", row.recipient_id).limit(10);
     if (error) throw error;
@@ -25,4 +51,4 @@ function createChatPush(db) {
     }
   };
 }
-module.exports = { createChatPush };
+module.exports = { createChatPush, hasChatPushConfig };

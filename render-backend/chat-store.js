@@ -18,7 +18,9 @@ function createChatStore(db) {
   return {
     async allowed(sender, recipient) {
       const [friends, blocks] = await Promise.all([
-        checked(db.from("friendships").select("friend_id").eq("user_id", sender).eq("friend_id", recipient).limit(1)),
+        checked(db.from("friendships").select("user_id,friend_id").or(
+          `and(user_id.eq.${sender},friend_id.eq.${recipient}),and(user_id.eq.${recipient},friend_id.eq.${sender})`
+        ).limit(1)),
         checked(db.from("blocks").select("user_id").or(
           `and(user_id.eq.${sender},blocked_user_id.eq.${recipient}),and(user_id.eq.${recipient},blocked_user_id.eq.${sender})`
         ).limit(1)),
@@ -46,6 +48,13 @@ function createChatStore(db) {
     },
     cleanup() {
       return checked(db.from("chat_delivery_queue").delete().lt("expires_at", new Date().toISOString()));
+    },
+    async health(pilotUsers) {
+      await checked(db.from("chat_delivery_queue").select("id").limit(1));
+      return {
+        databaseReady: true,
+        pilotFriendshipReady: pilotUsers.length === 2 && await this.allowed(pilotUsers[0], pilotUsers[1]),
+      };
     },
   };
 }
