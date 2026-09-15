@@ -130,7 +130,142 @@ private object IosChatStore {
         val uid = currentUid() ?: return
         syncFriendsAndRequests(uid)
         syncChats(uid)
-        syncGroups(uid)
+    }
+
+    private suspend fun syncFriendsAndRequests(uid: String) = coroutineScope {
+        val friendSnapshot = async {
+            suspendCancellableCoroutine<FIRQuerySnapshot?> { continuation ->
+                IosFirestoreRefs.userFriends(uid).getDocumentsWithCompletion { snapshot, error ->
+                    if (error != null) continuation.resumeWithException(Throwable(error.toString()))
+                    else continuation.resume(snapshot)
+                }
+            }
+        }
+        val requestSnapshot = async {
+            suspendCancellableCoroutine<FIRQuerySnapshot?> { continuation ->
+                IosFirestoreRefs.userFriendRequests(uid).getDocumentsWithCompletion { snapshot, error ->
+                    if (error != null) continuation.resumeWithException(Throwable(error.toString()))
+                    else continuation.resume(snapshot)
+                }
+            }
+        }
+
+        val friendIds = friendSnapshot.await()?.documents.orEmpty().mapNotNull { raw ->
+            val doc = raw as? FIRDocumentSnapshot ?: return@mapNotNull null
+            doc.data()?.asStringMap()?.get("uid").stringValue().ifBlank { doc.documentID }
+                .takeIf(String::isNotBlank)
+        }.distinct()
+        friends.value = friendIds.mapNotNull { friendId ->
+            IosUserStore.cachedUser(friendId) ?: IosUserStore.getUser(friendId)
+        }.map(IosUserProfile::toPureUser).sortedBy { it.name.lowercase() }
+        persistFriends()
+
+        friendRequests.value = requestSnapshot.await()?.documents.orEmpty().mapNotNull { raw ->
+            val doc = raw as? FIRDocumentSnapshot ?: return@mapNotNull null
+            val data = doc.data()?.asStringMap().orEmpty()
+            (data + mapOf(
+                "requestId" to doc.documentID,
+                "senderId" to data["senderId"].stringValue().ifBlank {
+                    data["senderUid"].stringValue().ifBlank { doc.documentID }
+                },
+                "receiverId" to uid
+            )).toPureFriendRequest()
+        }.filter { it.status.equals("PENDING", ignoreCase = true) }
+            .sortedByDescending(PureFriendRequest::timestamp)
+        persistRequests()
+    }
+
+    private suspend fun syncChats(uid: String) = coroutineScope {
+        val snapshot = suspendCancellableCoroutine<FIRQuerySnapshot?> { continuation ->
+            IosFirestoreRefs.userChats(uid).getDocumentsWithCompletion { result, error ->
+                if (error != null) continuation.resumeWithException(Throwable(error.toString()))
+                else continuation.resume(result)
+            }
+        }
+        chats.value = snapshot?.documents.orEmpty().mapNotNull { raw ->
+            val doc = raw as? FIRDocumentSnapshot ?: return@mapNotNull null
+            val data = doc.data()?.asStringMap().orEmpty()
+            val chatId = data["chatId"].stringValue().ifBlank { doc.documentID }
+            val friendUid = data["friendUid"].stringValue()
+            if (chatId.isBlank() || friendUid.isBlank()) return@mapNotNull null
+
+            val messageSnapshot = suspendCancellableCoroutine<FIRQuerySnapshot?> { continuation ->
+                IosFirestoreRefs.chatMessages(chatId).getDocumentsWithCompletion { result, error ->
+                    if (error != null) continuation.resumeWithException(Throwable(error.toString()))
+                    else continuation.resume(result)
+                }
+            }
+            val clearedAt = clearedChats[chatId] ?: 0L
+            val messages = messageSnapshot?.documents.orEmpty().mapNotNull { messageRaw ->
+                val messageDoc = messageRaw as? FIRDocumentSnapshot ?: return@mapNotNull null
+                messageDoc.data()?.asStringMap()?.toPureMessage(chatId, messageDoc.documentID)
+            }.filter { it.timestamp > clearedAt }.sortedBy(PureMessage::timestamp)
+            updateChatMessages(chatId, messages)
+
+            val profile = IosUserStore.cachedUser(friendUid) ?: IosUserStore.getUser(friendUid)
+            val lastReadAt = lastReadChats[chatId] ?: 0L
+            PureChat(
+                chatId = chatId,
+                friendUid = friendUid,
+                friendName = profile?.name?.takeIf(String::isNotBlank)
+                    ?: data["friendName"].stringValue().ifBlank { "Friend" },
+                friendProfilePicUrl = profile?.profilePicUrl?.takeIf(String::isNotBlank)
+                    ?: data["friendProfilePicUrl"].stringValue().takeIf(String::isNotBlank),
+                lastMessage = data["lastMessage"].stringValue(),
+                lastMessageTime = data["lastMessageTime"].longValue(),
+                unreadCount = messages.count { it.senderId != uid && it.timestamp > lastReadAt }
+            )
+        }.sortedByDescending(PureChat::lastMessageTime)
+        persistChats()
+    }
+
+    private suspend fun syncGroups(uid: String) = coroutineScope {
+        val membershipSnapshot = suspendCancellableCoroutine<FIRQuerySnapshot?> { continuation ->
+            IosFirestoreRefs.userGroups(uid).getDocumentsWithCompletion { result, error ->
+                if (error != null) continuation.resumeWithException(Throwable(error.toString()))
+                else continuation.resume(result)
+            }
+        }
+        val groupIds = membershipSnapshot?.documents.orEmpty().mapNotNull { raw ->
+            val doc = raw as? FIRDocumentSnapshot ?: return@mapNotNull null
+            doc.data()?.asStringMap()?.get("groupId").stringValue().ifBlank { doc.documentID }
+                .takeIf(String::isNotBlank)
+        }.distinct()
+
+        groups.value = groupIds.mapNotNull { groupId ->
+            val groupDoc = suspendCancellableCoroutine<FIRDocumentSnapshot?> { continuation ->
+                IosFirestoreRefs.group(groupId).getDocumentWithCompletion { result, error ->
+                    if (error != null) continuation.resumeWithException(Throwable(error.toString()))
+                    else continuation.resume(result)
+                }
+            }
+            val group = groupDoc?.data()?.asStringMap()?.toPureGroup(groupId)
+                ?: return@mapNotNull null
+            val messageSnapshot = suspendCancellableCoroutine<FIRQuerySnapshot?> { continuation ->
+                IosFirestoreRefs.groupMessages(groupId).getDocumentsWithCompletion { result, error ->
+                    if (error != null) continuation.resumeWithException(Throwable(error.toString()))
+                    else continuation.resume(result)
+                }
+            }
+            val clearedAt = clearedGroups[groupId] ?: 0L
+            val rawMessages = messageSnapshot?.documents.orEmpty().mapNotNull { messageRaw ->
+                val messageDoc = messageRaw as? FIRDocumentSnapshot ?: return@mapNotNull null
+                val data = messageDoc.data()?.asStringMap() ?: return@mapNotNull null
+                data to data.toPureGroupMessage(groupId, messageDoc.documentID)
+            }.filter { (_, message) -> message.timestamp > clearedAt }
+                .sortedBy { (_, message) -> message.timestamp }
+            val messages = rawMessages.map { it.second }
+            updateGroupMessages(groupId, messages)
+            val lastReadAt = lastReadGroups[groupId] ?: 0L
+            val unread = rawMessages.count { (data, message) ->
+                message.senderId != uid &&
+                    message.timestamp > lastReadAt &&
+                    data["seenBy"].asStringMap()?.containsKey(uid) != true
+            }
+            group.copy(unreadCount = unread)
+        }.sortedByDescending(PureGroup::lastMessageTime)
+        lastGroupsRefreshAt = currentTimeMillis()
+        persistGroups()
     }
 
     suspend fun refreshGroupsNow() {
@@ -166,6 +301,22 @@ private object IosChatStore {
                 profile.location != null &&
                 GeoUtils.distanceMeters(GeoPoint(lat, lng), profile.location) <= 10_000.0
         }?.map { it.toPureUser() } ?: emptyList()
+    }
+
+    suspend fun toggleGhostMode(isGhostMode: Boolean) {
+        val uid = currentUid() ?: throw Exception("Not logged in")
+        suspendCancellableCoroutine<Unit> { continuation ->
+            IosFirestoreRefs.user(uid).updateData(
+                mapOf(
+                    "ghostMode" to isGhostMode,
+                    "lastUpdated" to currentTimeMillis()
+                ) as Map<Any?, *>
+            ) { error ->
+                if (error != null) continuation.resumeWithException(Throwable(error.toString()))
+                else continuation.resume(Unit)
+            }
+        }
+        IosUserStore.getUser(uid)
     }
 
     suspend fun sendFriendRequest(email: String) {
@@ -1264,6 +1415,21 @@ class IosChatRepository : IChatRepository {
         IosChatStore.createGroup(name, memberUids, iconUrl)
     }
 
+    suspend fun createAdvancedGroup(
+        name: String,
+        memberUids: List<String>,
+        iconUrl: String?,
+        customPublicId: String,
+        visibility: String
+    ) = IosChatStore.createAdvancedGroup(name, memberUids, iconUrl, customPublicId, visibility)
+
+    suspend fun searchGroupByCode(code: String): PureGroup? = IosChatStore.searchGroupByCode(code)
+
+    suspend fun getFeaturedGroups(): List<PureGroup> = IosChatStore.getFeaturedGroups()
+
+    suspend fun updateGroupPublicId(groupId: String, newId: String) =
+        IosChatStore.updateGroupPublicId(groupId, newId)
+
     override suspend fun toggleGhostMode(isGhostMode: Boolean) {
         IosChatStore.toggleGhostMode(isGhostMode)
     }
@@ -1326,6 +1492,9 @@ class IosChatRepository : IChatRepository {
         IosChatStore.deleteMessagesForEveryone(chatId, messageIds)
     }
 
+    suspend fun editMessage(chatId: String, messageId: String, newContent: String) =
+        IosChatStore.editMessage(chatId, messageId, newContent)
+
     suspend fun deleteGroupMessagesLocally(messageIds: List<String>) {
         IosChatStore.deleteGroupMessagesLocally(messageIds)
     }
@@ -1333,6 +1502,9 @@ class IosChatRepository : IChatRepository {
     suspend fun deleteGroupMessagesForEveryone(groupId: String, messageIds: List<String>) {
         IosChatStore.deleteGroupMessagesForEveryone(groupId, messageIds)
     }
+
+    suspend fun editGroupMessage(groupId: String, messageId: String, newContent: String) =
+        IosChatStore.editGroupMessage(groupId, messageId, newContent)
 
     suspend fun blockUser(friendUid: String) = IosChatStore.blockUser(friendUid)
 

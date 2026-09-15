@@ -163,6 +163,14 @@ val verifyKmpArchitecture by tasks.registering {
                 }
             }
         }
+        val iosHome = project.file("src/iosMain/kotlin/com/example/shared/HomeViewController.kt").readText()
+        if (!iosHome.contains("selectedTab = chatTab") || iosHome.contains("selectedTab = 0")) {
+            violations += "HomeViewController.kt: iOS must expose the shared Chat/Community tabs"
+        }
+        val iosSupport = project.file("src/iosMain/kotlin/com/example/shared/repository/IosPlatformSupport.kt").readText()
+        if (!iosSupport.contains("auth.importAuthToken") || !iosSupport.contains("currentAccessTokenOrNull")) {
+            violations += "IosPlatformSupport.kt: iOS auth must bridge into the shared Supabase session"
+        }
         check(violations.isEmpty()) {
             "KMP architecture violations:\n${violations.joinToString("\n")}"
         }

@@ -39,10 +39,8 @@ import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.unit.dp
 import com.example.shared.model.Announcement
 import com.example.shared.model.PureChat
-import com.example.shared.model.PureGroup
 import com.example.shared.repository.AnnouncementRepository
 import com.example.shared.repository.IosChatRepository
-import com.example.shared.repository.IosGroupMember
 import com.example.shared.repository.IosPreferencesStore
 import com.example.shared.repository.IosUserProfile
 import com.example.shared.repository.IosUserStore
@@ -51,15 +49,9 @@ import com.example.shared.ui.PureAnnouncementCard
 import com.example.shared.ui.PureAnnouncementDetailScreen
 import com.example.shared.ui.PureAvatarPlaceholder
 import com.example.shared.ui.PureChatDetailScreen
-import com.example.shared.ui.PureGroupChatDetailScreen
-import com.example.shared.ui.PureGroupInfoScreen
-import com.example.shared.ui.PureGroupInfoLine
-import com.example.shared.ui.PureGroupMember as UiGroupMember
 import com.example.shared.ui.PureProfileScreen
 import com.example.shared.ui.PureReportDialog
 import com.example.shared.ui.PureSharePostDialog
-import com.example.shared.utils.GroupLinkPayload
-import com.example.shared.utils.buildGroupLink
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.delay
 
@@ -68,8 +60,7 @@ internal fun IosChatDetailContent(
     chat: PureChat,
     repository: IosChatRepository,
     onBack: () -> Unit,
-    onProfileClick: (String) -> Unit,
-    onOpenGroupLink: (GroupLinkPayload) -> Unit
+    onProfileClick: (String) -> Unit
 ) {
     val scope = rememberCoroutineScope()
     val clipboard = LocalClipboardManager.current
@@ -157,7 +148,6 @@ internal fun IosChatDetailContent(
         formatTime = ::iosRelativeTime,
         formatDateHeader = ::iosDateHeader,
         onOpenPostLink = {},
-        onOpenGroupLink = onOpenGroupLink,
         renderImage = { url, modifier, scale ->
             IosRemoteImage(url, modifier, scale)
         }
@@ -173,6 +163,8 @@ internal fun IosChatDetailContent(
     }
 }
 
+/* Retired iOS-only Firestore group chat UI. PureGroupsScreen is the shared
+   Supabase implementation used by both Android and iOS.
 @Composable
 internal fun IosGroupChatDetailContent(
     group: PureGroup,
@@ -264,6 +256,7 @@ internal fun IosGroupChatDetailContent(
     }
 }
 
+*/
 @Composable
 internal fun IosAnnouncementDetailContent(
     announcementId: String,
@@ -552,6 +545,7 @@ internal fun IosProfileContent(
     }
 }
 
+/* Retired iOS-only Firestore group info UI; see PureGroupsScreen.
 @Composable
 internal fun IosGroupInfoContent(
     group: PureGroup,
@@ -719,6 +713,7 @@ internal fun IosGroupInfoContent(
     }
 }
 
+*/
 internal fun iosRelativeTime(timestamp: Long): String {
     val diff = (currentTimeMillis() - timestamp).coerceAtLeast(0L)
     val minutes = diff / 60_000L

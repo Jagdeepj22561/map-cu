@@ -45,12 +45,11 @@ import androidx.compose.ui.unit.dp
 import com.example.shared.model.Announcement
 import com.example.shared.model.AnnouncementType
 import com.example.shared.model.PureChat
-import com.example.shared.model.PureGroup
 import com.example.shared.model.buildAnnouncementId
 import com.example.shared.repository.AnnouncementRepository
 import com.example.shared.repository.IosChatRepository
+import com.example.shared.repository.IosAuthApi
 import com.example.shared.repository.IosPreferencesStore
-import com.example.shared.repository.IosSessionStore
 import com.example.shared.repository.IosLocalDatabaseStore
 import com.example.shared.repository.IosUserProfile
 import com.example.shared.repository.IosUserStore
@@ -60,7 +59,6 @@ import com.example.shared.ui.PureAppScreen
 import com.example.shared.ui.PureAppTheme
 import com.example.shared.ui.PureAvatarPlaceholder
 import com.example.shared.ui.PureChatScreen
-import com.example.shared.ui.PureCreateGroupBottomSheet
 import com.example.shared.ui.PureCreatePostDialog
 import com.example.shared.ui.PureDeleteChatDialog
 import com.example.shared.ui.PureFriendManagerBottomSheet
@@ -70,7 +68,6 @@ import com.example.shared.ui.PureNearbyUsersBottomSheet
 import com.example.shared.ui.PureNewChatBottomSheet
 import com.example.shared.ui.PureRoutePickerBottomSheet
 import com.example.shared.ui.PureSettingsScreen
-import com.example.shared.utils.GroupLinkPayload
 import com.example.shared.utils.ExternalNavigator
 import com.example.shared.utils.ArrivalChecker
 import com.example.shared.utils.GeoUtils
@@ -165,7 +162,6 @@ internal fun HomeRoute(
 
     val currentUser by IosUserStore.currentUser.collectAsState(initial = null)
     val chats by chatRepository.allChats.collectAsState(initial = emptyList())
-    val groups by chatRepository.allGroups.collectAsState(initial = emptyList())
     val friends by chatRepository.friends.collectAsState(initial = emptyList())
     val requests by chatRepository.friendRequests.collectAsState(initial = emptyList())
     val announcements by announcementRepository.getAnnouncementsFlow().collectAsState(initial = emptyList())
@@ -182,8 +178,6 @@ internal fun HomeRoute(
     var announcementTab by remember { mutableIntStateOf(0) }
 
     var selectedChat by remember { mutableStateOf<PureChat?>(null) }
-    var selectedGroup by remember { mutableStateOf<PureGroup?>(null) }
-    var selectedGroupPreview by remember { mutableStateOf<GroupLinkPayload?>(null) }
     var selectedAnnouncementId by remember { mutableStateOf<String?>(null) }
     var selectedFriendUid by remember { mutableStateOf<String?>(null) }
     var friendProfile by remember { mutableStateOf<IosUserProfile?>(null) }
@@ -192,14 +186,11 @@ internal fun HomeRoute(
 
     var showFriendManager by remember { mutableStateOf(false) }
     var showNewChatSheet by remember { mutableStateOf(false) }
-    var showCreateGroupSheet by remember { mutableStateOf(false) }
-    var showDeleteGroupDialog by remember { mutableStateOf(false) }
     var showNearbySheet by remember { mutableStateOf(false) }
     var showCreatePostDialog by remember { mutableStateOf(false) }
     var showRoutePicker by remember { mutableStateOf(false) }
     var nearbyUsers by remember { mutableStateOf<List<com.example.shared.model.PureUser>>(emptyList()) }
     var nearbyLoading by remember { mutableStateOf(false) }
-    var groupToDelete by remember { mutableStateOf<PureGroup?>(null) }
 
     var isDarkMode by remember { mutableStateOf(IosPreferencesStore.isDarkMode()) }
     var isAudioEnabled by remember { mutableStateOf(IosPreferencesStore.isAudioEnabled()) }
@@ -233,6 +224,7 @@ internal fun HomeRoute(
     }
 
     LaunchedEffect(Unit) {
+        runCatching { IosAuthApi.restoreSharedSession() }
         chatRepository.startSync()
         runCatching { IosUserStore.refreshCurrentUser() }
         runCatching { announcementRepository.refreshNow() }
@@ -325,8 +317,6 @@ internal fun HomeRoute(
 
     fun resetSelections(next: PureAppScreen) {
         selectedChat = null
-        selectedGroup = null
-        selectedGroupPreview = null
         selectedAnnouncementId = null
         if (next == PureAppScreen.MAP) {
             friendProfile = null
@@ -380,7 +370,6 @@ internal fun HomeRoute(
                 scope.launch {
                     runCatching {
                         val chatId = chatRepository.createChatForFriend(friend.uid, friend.name)
-                        selectedGroup = null
                         selectedChat = PureChat(
                             chatId = chatId,
                             friendUid = friend.uid,
@@ -414,9 +403,8 @@ internal fun HomeRoute(
         )
     }
 
-    var featuredGroups by remember { mutableStateOf<List<PureGroupDiscoveryItem>>(emptyList()) }
-    var groupSearchResult by remember { mutableStateOf<PureGroupDiscoveryItem?>(null) }
-
+    /* Retired iOS-only Firestore group management. Community/team UI is now
+       provided by PureGroupsScreen through PureChatScreen on both platforms.
     if (showCreateGroupSheet) {
         LaunchedEffect(showCreateGroupSheet) {
             featuredGroups = chatRepository.getFeaturedGroups().map { PureGroupDiscoveryItem(it, groups.any { joined -> joined.groupId == it.groupId }) }
@@ -453,6 +441,7 @@ internal fun HomeRoute(
             renderImage = { url, modifier, scale -> IosRemoteImage(url, modifier, scale) }
         )
     }
+    */
 
     if (showCreatePostDialog) {
         PureCreatePostDialog(
@@ -519,27 +508,6 @@ internal fun HomeRoute(
                 scope.launch {
                     runCatching { chatRepository.deleteChat(target.chatId) }
                         .onFailure { errorMessage = it.message ?: "Failed to delete chat" }
-                }
-            }
-        )
-    }
-
-    if (showDeleteGroupDialog && groupToDelete != null) {
-        PureDeleteGroupDialog(
-            groupName = groupToDelete?.name ?: "this group",
-            onDismiss = {
-                showDeleteGroupDialog = false
-                groupToDelete = null
-            },
-            onConfirm = {
-                val target = groupToDelete ?: return@PureDeleteGroupDialog
-                showDeleteGroupDialog = false
-                groupToDelete = null
-                scope.launch {
-                    runCatching {
-                        chatRepository.exitGroup(target.groupId)
-                        chatRepository.refreshGroupsNow()
-                    }.onFailure { errorMessage = it.message ?: "Failed to remove group" }
                 }
             }
         )
@@ -629,7 +597,7 @@ internal fun HomeRoute(
             hideBars = isDetailActive
         ) { padding ->
             val overlayTopPadding = when {
-                currentScreen == PureAppScreen.CHAT && selectedChat == null && selectedGroup == null ->
+                currentScreen == PureAppScreen.CHAT && selectedChat == null ->
                     padding.calculateTopPadding()
                 currentScreen == PureAppScreen.ANNOUNCEMENTS && selectedAnnouncementId == null ->
                     padding.calculateTopPadding()
@@ -770,17 +738,14 @@ internal fun HomeRoute(
                                         onProfileClick = { uid ->
                                             selectedFriendUid = uid
                                             currentScreen = PureAppScreen.FRIEND_PROFILE
-                                        },
-                                        onOpenGroupLink = {
-                                            errorMessage = "Group section has been removed"
                                         }
                                     )
                                 } else {
                                     Box(modifier = Modifier.fillMaxSize()) {
                                         PureChatScreen(
                                             repository = chatRepository,
-                                            selectedTab = 0,
-                                            onTabSelected = { chatTab = 0 },
+                                            selectedTab = chatTab,
+                                            onTabSelected = { chatTab = it },
                                             onChatClick = { chat -> selectedChat = chat },
                                             onGroupClick = {},
                                             onAddFriendClick = { showFriendManager = true },
@@ -806,6 +771,23 @@ internal fun HomeRoute(
                                             },
                                             onGroupLongClick = {},
                                             searchQuery = searchQuery,
+                                            onMessagePrivately = { senderUid, senderName ->
+                                                scope.launch {
+                                                    runCatching {
+                                                        val chatId = chatRepository.createChatForFriend(senderUid, senderName)
+                                                        selectedChat = PureChat(
+                                                            chatId = chatId,
+                                                            friendUid = senderUid,
+                                                            friendName = senderName,
+                                                            lastMessage = "",
+                                                            lastMessageTime = currentTimeMillis()
+                                                        )
+                                                        chatTab = 0
+                                                    }.onFailure {
+                                                        errorMessage = it.message ?: "Unable to open private chat"
+                                                    }
+                                                }
+                                            },
                                             renderImage = { url, modifier, scale ->
                                                 IosRemoteImage(url, modifier, scale)
                                             }
@@ -903,9 +885,11 @@ internal fun HomeRoute(
                                         onLogout = {
                                             chatRepository.clearAllListeners()
                                             chatRepository.resetSessionState()
-                                            IosSessionStore.clear()
                                             IosUserStore.resetCurrentUser()
-                                            onLogout()
+                                            scope.launch {
+                                                IosAuthApi.logout()
+                                                onLogout()
+                                            }
                                         },
                                         onBack = { currentScreen = previousScreen },
                                         externalNavigator = externalNavigator

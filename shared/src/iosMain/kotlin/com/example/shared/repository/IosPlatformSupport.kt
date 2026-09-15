@@ -15,6 +15,8 @@ import com.example.shared.PlaceCategory
 import com.example.shared.Route
 import com.example.shared.RoutesData
 import com.example.shared.campusPlaces
+import com.example.shared.data.SupabaseClientProvider
+import io.github.jan.supabase.auth.auth
 import kotlinx.cinterop.ExperimentalForeignApi
 import kotlinx.cinterop.ObjCObjectVar
 import kotlinx.cinterop.alloc
@@ -422,7 +424,41 @@ internal object IosAuthApi {
             refreshToken = payload["refresh_token"].stringValue().takeIf { it.isNotBlank() }
         )
         IosSessionStore.save(session)
+        importSharedSession(session)
         return session
+    }
+
+    suspend fun restoreSharedSession() {
+        val auth = SupabaseClientProvider.client.auth
+        auth.awaitInitialization()
+        val storedSession = IosSessionStore.current()
+        val sharedSession = auth.currentSessionOrNull()
+        if (sharedSession != null) {
+            IosSessionStore.save(
+                IosAuthSession(
+                    uid = sharedSession.user?.id ?: storedSession?.uid.orEmpty(),
+                    email = sharedSession.user?.email ?: storedSession?.email.orEmpty(),
+                    idToken = sharedSession.accessToken,
+                    refreshToken = sharedSession.refreshToken.takeIf(String::isNotBlank)
+                )
+            )
+        } else if (storedSession != null) {
+            importSharedSession(storedSession)
+        }
+    }
+
+    suspend fun logout() {
+        runCatching { SupabaseClientProvider.client.auth.signOut() }
+        IosSessionStore.clear()
+    }
+
+    private suspend fun importSharedSession(session: IosAuthSession) {
+        SupabaseClientProvider.client.auth.importAuthToken(
+            accessToken = session.idToken,
+            refreshToken = session.refreshToken.orEmpty(),
+            retrieveUser = true,
+            autoRefresh = !session.refreshToken.isNullOrBlank()
+        )
     }
 
     suspend fun sendPasswordReset(email: String) {
@@ -498,11 +534,12 @@ internal object IosAuthApi {
 /** Minimal PostgREST client so iOS does not need Firebase for profile data. */
 internal object IosSupabase {
     private fun headers(extra: Map<String, String> = emptyMap()): Map<String, String> {
-        val session = IosSessionStore.current()
+        val accessToken = SupabaseClientProvider.client.auth.currentAccessTokenOrNull()
+            ?: IosSessionStore.current()?.idToken
         return buildMap {
             put("apikey", IosPlatformConfig.supabasePublishableKey)
             put("Accept", "application/json")
-            session?.idToken?.takeIf { it.isNotBlank() }?.let { put("Authorization", "Bearer $it") }
+            accessToken?.takeIf { it.isNotBlank() }?.let { put("Authorization", "Bearer $it") }
             putAll(extra)
         }
     }
@@ -965,7 +1002,9 @@ fun iosCurrentSessionEmail(): String = IosSessionStore.current()?.email ?: ""
 
 fun iosCurrentSessionUid(): String = IosSessionStore.current()?.uid ?: ""
 
-fun iosCurrentSessionAccessToken(): String = IosSessionStore.current()?.idToken ?: ""
+fun iosCurrentSessionAccessToken(): String =
+    SupabaseClientProvider.client.auth.currentAccessTokenOrNull()
+        ?: IosSessionStore.current()?.idToken.orEmpty()
 
 private fun String.firebaseFriendlyMessage(): String {
     return when (trim()) {

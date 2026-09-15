@@ -53,11 +53,17 @@ Android legitimately owns Room and the native chat socket, but its chat
 repository still mixes platform storage with social metadata queries. Those
 shared rules should continue moving behind common interfaces.
 
-The remaining legacy boundary is the iOS Firebase profile/chat/group store in
-`iosMain`. It must be migrated feature-by-feature behind common repository
-interfaces before Firebase can be removed. Do not add new behavior to that
-store. New data and business rules belong in `commonMain` and use Supabase; only
-the local persistence and Apple framework calls belong in `iosMain`.
+The Community tab now uses `PureGroupsScreen` and its Supabase data path on both
+platforms. The inaccessible iOS-only Firestore group screens are retired and
+the periodic iOS sync no longer reads legacy Firestore groups.
+
+The remaining legacy boundary is direct chat and social metadata in the iOS
+Firebase store. It must be migrated feature-by-feature behind common repository
+interfaces before Firebase can be removed. New data and business rules belong
+in `commonMain` and use Supabase; only local persistence and Apple framework
+calls belong in `iosMain`. iOS authentication is imported into the shared
+Supabase auth client so shared repositories use the same session and token
+refresh lifecycle as Android.
 
 ## Verification
 

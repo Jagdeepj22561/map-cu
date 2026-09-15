@@ -31,3 +31,32 @@ data class PureFriendRequest(
     val status: String,
     val timestamp: Long = 0L
 )
+
+data class PureGroup(
+    val groupId: String,
+    val name: String,
+    val ownerUid: String,
+    val lastMessage: String,
+    val lastMessageTime: Long,
+    val unreadCount: Int = 0,
+    val createdAt: Long = 0L,
+    val groupIconUrl: String? = null,
+    val publicGroupId: String? = null,
+    val visibility: String = "PRIVATE",
+    val isDefaultGroup: Boolean = false,
+    val inviteCode: String? = null,
+    val memberCount: Int = 0,
+    val pinnedMessageId: String? = null,
+    val pinnedMessagePreview: String? = null
+)
+
+data class PureGroupMessage(
+    val messageId: String,
+    val groupId: String,
+    val senderId: String,
+    val senderName: String,
+    val content: String,
+    val timestamp: Long,
+    val imageUrl: String? = null,
+    val type: String = "TEXT"
+)
