@@ -20,7 +20,7 @@ import androidx.compose.ui.unit.dp
 import com.example.shared.repository.IosAuthApi
 import com.example.shared.repository.IosPreferencesStore
 import com.example.shared.repository.IosUserStore
-import com.example.shared.repository.ChatRepository
+import com.example.shared.repository.IosChatRepository
 import com.example.shared.ui.PureLoginScreen
 import kotlinx.coroutines.launch
 import platform.UIKit.UIViewController
@@ -77,7 +77,7 @@ internal fun LoginRoute(
                     scope.launch {
                         runCatching {
                             val session = IosAuthApi.login(normalizedEmail, password)
-                            ChatRepository().resetSessionState()
+                            IosChatRepository().resetSessionState()
                             val user = runCatching {
                                 IosUserStore.refreshCurrentUser()
                                     ?: IosUserStore.getUser(session.uid)

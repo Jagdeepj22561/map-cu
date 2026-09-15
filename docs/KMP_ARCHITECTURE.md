@@ -38,10 +38,20 @@ to shared code through interfaces from each platform's composition root.
 
 ## Current migration boundary
 
-Announcements, events, teams, notification dispatch, models, and shared UI are
-already in `commonMain`. Android legitimately owns Room and the native socket,
-but its current repository still mixes platform storage with social metadata
-queries; those shared rules should continue moving behind common interfaces.
+Announcement queries, DTOs, mapping, mutations, events, teams, notification
+dispatch, models, and reusable UI are in `commonMain`. Android's announcement
+repository is only a Room/lifecycle decorator around
+`AnnouncementRemoteDataSource`; iOS uses the cache-free shared repository.
+
+Android `HomeScreen`, `ChatScreen`, and `ChatDetailScreen` are composition-root
+wrappers: they own Android permissions, activities, Room flows, image picking,
+toasts, and navigation, then delegate rendering to `PureHomeScreen`,
+`PureChatScreen`, and `PureChatDetailScreen`. Their existence is intentional and
+is not a second UI implementation.
+
+Android legitimately owns Room and the native chat socket, but its chat
+repository still mixes platform storage with social metadata queries. Those
+shared rules should continue moving behind common interfaces.
 
 The remaining legacy boundary is the iOS Firebase profile/chat/group store in
 `iosMain`. It must be migrated feature-by-feature behind common repository
@@ -53,6 +63,7 @@ the local persistence and Apple framework calls belong in `iosMain`.
 
 ```powershell
 ./gradlew :shared:verifyKmpArchitecture
+./gradlew :app:verifyKmpFeatureDelegation
 ./gradlew :shared:testAndroidHostTest
 ./gradlew :app:compileDebugKotlin --no-daemon
 ```

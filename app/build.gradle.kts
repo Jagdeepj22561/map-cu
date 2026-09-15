@@ -188,6 +188,37 @@ val verifyChatTransportBoundary by tasks.registering {
     }
 }
 
+val verifyKmpFeatureDelegation by tasks.registering {
+    group = "verification"
+    description = "Prevents Android feature wrappers from duplicating shared UI and announcement networking."
+    doLast {
+        val requiredDelegates = mapOf(
+            "src/main/java/com/example/maps123/ui/screens/HomeScreen.kt" to "PureHomeScreen(",
+            "src/main/java/com/example/maps123/ui/screens/ChatScreen.kt" to "PureChatScreen(",
+            "src/main/java/com/example/maps123/ui/screens/ChatDetailScreen.kt" to "PureChatDetailScreen(",
+            "src/main/java/com/example/maps123/ui/screens/AnnouncementsScreen.kt" to "PureAnnouncementsScreen(",
+            "src/main/java/com/example/maps123/ui/screens/AnnouncementDetailScreen.kt" to "PureAnnouncementDetailScreen("
+        )
+        val violations = requiredDelegates.mapNotNull { (path, call) ->
+            val source = file(path)
+            if (source.readText().contains(call)) null else "$path must delegate rendering to $call"
+        }.toMutableList()
+
+        val announcementWrapper = file(
+            "src/main/java/com/example/maps123/data/repository/AnnouncementRepository.kt"
+        ).readText()
+        listOf(".from(", "@Serializable", "data class AnnouncementRow").forEach { token ->
+            if (announcementWrapper.contains(token)) {
+                violations += "Android AnnouncementRepository contains shared networking/DTO token: $token"
+            }
+        }
+        check(violations.isEmpty()) {
+            "KMP feature delegation violations:\n${violations.joinToString("\n")}"
+        }
+    }
+}
+
 tasks.matching { it.name == "check" }.configureEach {
     dependsOn(verifyChatTransportBoundary)
+    dependsOn(verifyKmpFeatureDelegation)
 }

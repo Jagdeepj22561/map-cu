@@ -1240,7 +1240,8 @@ private object IosChatStore {
     }
 }
 
-class ChatRepository : IChatRepository {
+/** Temporary iOS Firestore adapter; replace with the shared custom-chat transport. */
+class IosChatRepository : IChatRepository {
     override val allChats: Flow<List<PureChat>> = IosChatStore.chats
     val allGroups: Flow<List<PureGroup>> = IosChatStore.groups
 

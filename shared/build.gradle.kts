@@ -145,7 +145,7 @@ kotlin {
 
 val verifyKmpArchitecture by tasks.registering {
     group = "verification"
-    description = "Checks that commonMain contains portable code and repository interfaces, not platform implementations."
+    description = "Checks that commonMain code remains portable and repository boundaries stay explicit."
     doLast {
         val commonSource = project.file("src/commonMain/kotlin")
         val violations = mutableListOf<String>()

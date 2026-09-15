@@ -48,7 +48,7 @@ import com.example.shared.model.PureChat
 import com.example.shared.model.PureGroup
 import com.example.shared.model.buildAnnouncementId
 import com.example.shared.repository.AnnouncementRepository
-import com.example.shared.repository.ChatRepository
+import com.example.shared.repository.IosChatRepository
 import com.example.shared.repository.IosPreferencesStore
 import com.example.shared.repository.IosSessionStore
 import com.example.shared.repository.IosLocalDatabaseStore
@@ -160,7 +160,7 @@ internal fun HomeRoute(
     onLogout: () -> Unit
 ) {
     val scope = rememberCoroutineScope()
-    val chatRepository = remember { ChatRepository() }
+    val chatRepository = remember { IosChatRepository() }
     val announcementRepository = remember { AnnouncementRepository() }
 
     val currentUser by IosUserStore.currentUser.collectAsState(initial = null)
@@ -237,6 +237,10 @@ internal fun HomeRoute(
         runCatching { IosUserStore.refreshCurrentUser() }
         runCatching { announcementRepository.refreshNow() }
         currentLocation = currentUser?.location ?: defaultLocation
+    }
+
+    DisposableEffect(announcementRepository) {
+        onDispose { announcementRepository.stopSync() }
     }
 
     DisposableEffect(currentScreen == PureAppScreen.MAP) {

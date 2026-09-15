@@ -41,7 +41,7 @@ import com.example.shared.model.Announcement
 import com.example.shared.model.PureChat
 import com.example.shared.model.PureGroup
 import com.example.shared.repository.AnnouncementRepository
-import com.example.shared.repository.ChatRepository
+import com.example.shared.repository.IosChatRepository
 import com.example.shared.repository.IosGroupMember
 import com.example.shared.repository.IosPreferencesStore
 import com.example.shared.repository.IosUserProfile
@@ -66,7 +66,7 @@ import kotlinx.coroutines.delay
 @Composable
 internal fun IosChatDetailContent(
     chat: PureChat,
-    repository: ChatRepository,
+    repository: IosChatRepository,
     onBack: () -> Unit,
     onProfileClick: (String) -> Unit,
     onOpenGroupLink: (GroupLinkPayload) -> Unit
@@ -176,7 +176,7 @@ internal fun IosChatDetailContent(
 @Composable
 internal fun IosGroupChatDetailContent(
     group: PureGroup,
-    repository: ChatRepository,
+    repository: IosChatRepository,
     onBack: () -> Unit,
     onInfoClick: () -> Unit,
     onOpenGroupLink: (GroupLinkPayload) -> Unit,
@@ -555,7 +555,7 @@ internal fun IosProfileContent(
 @Composable
 internal fun IosGroupInfoContent(
     group: PureGroup,
-    repository: ChatRepository,
+    repository: IosChatRepository,
     joinPreview: Boolean = false,
     linkPayload: GroupLinkPayload? = null,
     onBack: () -> Unit,
