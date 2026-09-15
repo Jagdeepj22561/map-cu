@@ -1,6 +1,7 @@
 package com.example.maps123.data.repository
 
 import android.content.Context
+import android.util.Log
 import androidx.room.withTransaction
 import com.example.maps123.BuildConfig
 import com.example.maps123.data.local.AppDatabase
@@ -31,8 +32,10 @@ class CustomChatClient(private val context: Context) {
                     backoff = 1000L
                 } catch (cancelled: CancellationException) {
                     throw cancelled
-                } catch (_: Exception) {
-                    // Credentials and message content must never enter logs.
+                } catch (error: Exception) {
+                    // Never log credentials or content, but connection state is
+                    // essential for diagnosing queued delivery failures.
+                    Log.w(TAG, "Socket disconnected; retrying in ${backoff}ms (${error.javaClass.simpleName})")
                 }
                 delay(backoff + kotlin.random.Random.nextLong(500))
                 backoff = (backoff * 2).coerceAtMost(60000)
@@ -55,13 +58,20 @@ class CustomChatClient(private val context: Context) {
         val incoming = Channel<String>(256)
         val ws = http.newWebSocket(Request.Builder().url(url).build(), object : WebSocketListener() {
             override fun onOpen(webSocket: WebSocket, response: Response) {
+                Log.d(TAG, "Socket opened; authenticating")
                 webSocket.send(JSONObject().put("type", "auth").put("token", token).toString())
             }
             override fun onMessage(webSocket: WebSocket, text: String) {
                 if (!incoming.trySend(text).isSuccess) webSocket.cancel()
             }
-            override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) { incoming.close(t) }
-            override fun onClosed(webSocket: WebSocket, code: Int, reason: String) { incoming.close() }
+            override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
+                Log.w(TAG, "Socket failure (${response?.code ?: "no-http-response"}, ${t.javaClass.simpleName})")
+                incoming.close(t)
+            }
+            override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
+                Log.d(TAG, "Socket closed ($code)")
+                incoming.close()
+            }
             override fun onClosing(webSocket: WebSocket, code: Int, reason: String) { webSocket.close(code, null) }
         })
         socket = ws
@@ -76,10 +86,15 @@ class CustomChatClient(private val context: Context) {
                 if (text != null) {
                     val event = JSONObject(text)
                     when (event.getString("type")) {
-                        "ready" -> ready = true
+                        "ready" -> {
+                            ready = true
+                            Log.d(TAG, "Chat session ready")
+                        }
                         "accepted" -> {
-                            dao.updateMessageSyncStatus(event.getString("id"), true)
-                            inflight.remove(event.getString("id"))
+                            val id = event.getString("id")
+                            val updated = dao.updateMessageSyncStatus(id, true)
+                            inflight.remove(id)
+                            if (updated == 0) Log.w(TAG, "Server accepted an unknown local message id")
                         }
                         "error" -> {
                             if (!event.isNull("id") && !event.optBoolean("retryable", true)) {
@@ -87,7 +102,7 @@ class CustomChatClient(private val context: Context) {
                                 inflight.remove(event.getString("id"))
                             } else {
                                 // A transient database/network failure preserves pending state.
-                                error("Server temporarily unavailable")
+                                error("Server temporarily unavailable: ${event.optString("message", "chat error")}")
                             }
                         }
                         "message" -> {
@@ -97,7 +112,7 @@ class CustomChatClient(private val context: Context) {
                             val chatId = row.getString("chat_id")
                             val senderId = row.getString("sender_id")
                             val timestamp = Instant.parse(row.getString("created_at")).toEpochMilli()
-                            val content = row.getString("content")
+                            val content = row.optString("content", "")
                             val image = if (row.isNull("image_url")) null else row.getString("image_url")
                             db.withTransaction {
                                 if (dao.getMessageById(id) == null) {
@@ -105,7 +120,7 @@ class CustomChatClient(private val context: Context) {
                                     val read = activeChatId == chatId
                                     dao.insertMessage(MessageEntity(id, chatId, senderId, content, timestamp,
                                         isRead = read, isSynced = true, imageUrl = image,
-                                        type = row.getString("type"), customTransport = true))
+                                        type = row.optString("type", if (image == null) "TEXT" else "IMAGE"), customTransport = true))
                                     val chat = existingChat ?: ChatEntity(chatId, senderId, "Friend", lastMessage = "", lastMessageTime = 0)
                                     dao.insertChat(chat.copy(
                                         lastMessage = if (timestamp >= chat.lastMessageTime) (if (image == null) content else "Image") else chat.lastMessage,
@@ -142,6 +157,7 @@ class CustomChatClient(private val context: Context) {
 
     private var lastSync = 0L
     companion object {
+        private const val TAG = "CustomChat"
         const val DELIVERY_TTL_MS = 72 * 60 * 60 * 1000L
         private val http = OkHttpClient.Builder().pingInterval(25, TimeUnit.SECONDS)
             .connectTimeout(90, TimeUnit.SECONDS).readTimeout(0, TimeUnit.SECONDS).build()

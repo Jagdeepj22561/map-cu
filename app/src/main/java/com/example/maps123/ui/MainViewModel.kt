@@ -16,6 +16,9 @@ import com.example.maps123.utils.toGeoPoint
 import com.example.maps123.ui.theme.ThemePrefs
 import com.google.android.gms.maps.model.LatLng
 import com.example.maps123.data.repository.AuthRepository
+import com.example.maps123.data.supabase.SupabaseProvider
+import io.github.jan.supabase.auth.auth
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -48,10 +51,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         Log.d("DEBUG_VM", "ViewModel INIT called")
         loadRoutes()
         
-        // Initialize chat only if logged in
-        if (AuthRepository.currentUserId() != null) {
-            initializeChat()
-        }
+        // Supabase restores a persisted session asynchronously. Always start
+        // initialization and let it await Auth before deciding whether a user
+        // is signed in. A synchronous currentUserOrNull() check loses chat
+        // recovery when Android cold-starts from a notification.
+        initializeChat()
         
         viewModelScope.launch {
             themePrefs.isVoiceEnabled.collect { enabled ->
@@ -62,7 +66,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun initializeChat() {
         Log.d("DEBUG_VM", "initializeChat CALLED")
-        com.example.maps123.data.firebase.FcmTokenSyncManager.syncCurrentToken(getApplication())
         if (isChatInitialized) return
         isChatInitialized = true
 
@@ -70,9 +73,18 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         
         userSessionJob = viewModelScope.launch {
             try {
+                val auth = SupabaseProvider.client.auth
+                auth.awaitInitialization()
+                if (auth.currentUserOrNull() == null) {
+                    isChatInitialized = false
+                    return@launch
+                }
+                com.example.maps123.data.firebase.FcmTokenSyncManager.syncCurrentToken(getApplication())
                 Log.d("DEBUG_VM", "startSync CALLED")
                 chatRepository.startSync()
-                refreshFriends(forceRefresh = false)
+                _friends.value = runCatching {
+                    chatRepository.getFriendsImplementation(forceRefresh = false)
+                }.getOrDefault(emptyList())
 
                 runCatching { chatRepository.refreshUserChatsNow(forceRefresh = true) }
                     .onFailure { Log.w("MainViewModel", "Initial chat refresh failed", it) }
@@ -88,8 +100,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         _uiState.update { it.copy(pendingFriendRequestCount = count) }
                     }
                 }
+            } catch (cancelled: CancellationException) {
+                throw cancelled
             } catch (e: Exception) {
-                e.printStackTrace()
+                isChatInitialized = false
+                Log.e("MainViewModel", "Chat initialization failed", e)
             }
         }
     }
@@ -115,9 +130,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun resumeRealtimeSync() {
-        if (AuthRepository.currentUserId() != null) {
-            initializeChat()
-        }
+        initializeChat()
     }
 
     fun refreshFriends(forceRefresh: Boolean = false) {

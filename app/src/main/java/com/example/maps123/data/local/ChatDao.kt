@@ -52,7 +52,7 @@ interface ChatDao {
     suspend fun getMessageById(messageId: String): MessageEntity?
 
     @Query("UPDATE messages SET isSynced = :isSynced WHERE messageId = :messageId")
-    suspend fun updateMessageSyncStatus(messageId: String, isSynced: Boolean)
+    suspend fun updateMessageSyncStatus(messageId: String, isSynced: Boolean): Int
 
     @Query("UPDATE messages SET isRead = :isRead WHERE messageId = :messageId")
     suspend fun updateMessageReadStatus(messageId: String, isRead: Boolean)
