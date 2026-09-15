@@ -39,8 +39,9 @@ to shared code through interfaces from each platform's composition root.
 ## Current migration boundary
 
 Announcements, events, teams, notification dispatch, models, and shared UI are
-already in `commonMain`. Android's Room-backed repositories are valid platform
-adapters because Room is a local-cache concern.
+already in `commonMain`. Android legitimately owns Room and the native socket,
+but its current repository still mixes platform storage with social metadata
+queries; those shared rules should continue moving behind common interfaces.
 
 The remaining legacy boundary is the iOS Firebase profile/chat/group store in
 `iosMain`. It must be migrated feature-by-feature behind common repository

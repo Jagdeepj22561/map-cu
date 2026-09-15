@@ -10,4 +10,5 @@ plugins {
     alias(libs.plugins.android.lint) apply false
     alias(libs.plugins.buildkonfig) apply false
     id("org.jetbrains.kotlin.plugin.serialization") version "2.2.21" apply false
+    id("androidx.room") version "2.8.4" apply false
 }

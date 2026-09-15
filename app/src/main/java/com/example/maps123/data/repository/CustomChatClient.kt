@@ -101,12 +101,12 @@ class CustomChatClient(private val context: Context) {
                             val image = if (row.isNull("image_url")) null else row.getString("image_url")
                             db.withTransaction {
                                 if (dao.getMessageById(id) == null) {
-                                    val old = dao.getChat(chatId)
+                                    val existingChat = dao.getChat(chatId)
                                     val read = activeChatId == chatId
                                     dao.insertMessage(MessageEntity(id, chatId, senderId, content, timestamp,
                                         isRead = read, isSynced = true, imageUrl = image,
                                         type = row.getString("type"), customTransport = true))
-                                    val chat = old ?: ChatEntity(chatId, senderId, "Friend", lastMessage = "", lastMessageTime = 0)
+                                    val chat = existingChat ?: ChatEntity(chatId, senderId, "Friend", lastMessage = "", lastMessageTime = 0)
                                     dao.insertChat(chat.copy(
                                         lastMessage = if (timestamp >= chat.lastMessageTime) (if (image == null) content else "Image") else chat.lastMessage,
                                         lastMessageTime = maxOf(timestamp, chat.lastMessageTime),

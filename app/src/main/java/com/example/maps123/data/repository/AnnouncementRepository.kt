@@ -137,25 +137,12 @@ class AnnouncementRepository(context: Context) {
             filter { eq("announcement_id", id) }
         }.decodeList<NestedComment>()
 
-        val authorIds = comments.map { it.authorId }.distinct().filter { it.isNotBlank() }
-        val profilesById = if (authorIds.isNotEmpty()) {
-            runCatching {
-                client.from("profiles").select {
-                    filter { isIn("id", authorIds) }
-                }.decodeList<AuthorProfileRow>().associateBy { it.id }
-            }.getOrDefault(emptyMap())
-        } else emptyMap()
-
         val result = row.copy(
             likes = likes.associate { it.userId to true },
             comments = comments.associate { comment ->
                 val profile = comment.profile
-                val fallbackProfile = profilesById[comment.authorId]
-                val authorName = profile?.name?.takeIf { it.isNotBlank() }
-                    ?: fallbackProfile?.name?.takeIf { it.isNotBlank() }
-                    ?: ""
+                val authorName = profile?.name?.takeIf { it.isNotBlank() }.orEmpty()
                 val authorPhoto = profile?.profilePicUrl?.takeIf { it.isNotBlank() }
-                    ?: fallbackProfile?.profilePicUrl?.takeIf { it.isNotBlank() }
                 comment.id to com.example.shared.model.Comment(
                     id = comment.id,
                     userId = comment.authorId,
@@ -299,35 +286,22 @@ class AnnouncementRepository(context: Context) {
                 if (remoteIds.isNotEmpty()) {
                     val allLikes = client.from("announcement_likes").select {
                         Columns.raw("announcement_id, user_id")
+                        filter { isIn("announcement_id", remoteIds) }
                     }.decodeList<AnnouncementLikeRow>()
 
                     // Fetch comment authors together with each comment. The
                     // profiles relation is defined by announcement_comments.author_id.
                     val allComments = client.from("announcement_comments").select {
                         Columns.raw("id, announcement_id, author_id, body, created_at, profiles(name, profile_pic_url)")
+                        filter { isIn("announcement_id", remoteIds) }
                     }.decodeList<NestedComment>()
 
-                    val likesByPost = allLikes.filter { it.announcementId in remoteIds }
-                        .groupBy({ it.announcementId }) { it.userId }
+                    val likesByPost = allLikes.groupBy({ it.announcementId }) { it.userId }
 
-                    val allAuthorIds = allComments.map { it.authorId }.distinct().filter { it.isNotBlank() }
-                    val profilesById = if (allAuthorIds.isNotEmpty()) {
-                        runCatching {
-                            client.from("profiles").select {
-                                filter { isIn("id", allAuthorIds) }
-                            }.decodeList<AuthorProfileRow>().associateBy { it.id }
-                        }.getOrDefault(emptyMap())
-                    } else emptyMap()
-
-                    val commentsByPost = allComments.filter { it.announcementId in remoteIds }
-                        .groupBy({ it.announcementId }) { comment ->
+                    val commentsByPost = allComments.groupBy({ it.announcementId }) { comment ->
                             val profile = comment.profile
-                            val fallbackProfile = profilesById[comment.authorId]
-                            val authorName = profile?.name?.takeIf { it.isNotBlank() }
-                                ?: fallbackProfile?.name?.takeIf { it.isNotBlank() }
-                                ?: ""
+                            val authorName = profile?.name?.takeIf { it.isNotBlank() }.orEmpty()
                             val authorPhoto = profile?.profilePicUrl?.takeIf { it.isNotBlank() }
-                                ?: fallbackProfile?.profilePicUrl?.takeIf { it.isNotBlank() }
                             com.example.shared.model.Comment(
                                 id = comment.id,
                                 userId = comment.authorId,

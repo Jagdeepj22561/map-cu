@@ -9,11 +9,6 @@ import cocoapods.FirebaseFirestore.FIRCollectionReference
 import cocoapods.FirebaseFirestore.FIRQuery
 import cocoapods.FirebaseFirestore.FIRFieldValue
 import cocoapods.FirebaseFirestore.FIRSetOptions
-import cocoapods.FirebaseDatabase.FIRDataEventType
-import cocoapods.FirebaseDatabase.FIRDataSnapshot
-import cocoapods.FirebaseDatabase.FIRDatabase
-import cocoapods.FirebaseDatabase.FIRDatabaseQuery
-import cocoapods.FirebaseDatabase.FIRDatabaseReference
 import com.example.shared.GeoPoint
 import com.example.shared.Place
 import com.example.shared.PlaceCategory
@@ -409,7 +404,7 @@ internal object IosHttpClient {
     }
 }
 
-internal object IosFirebaseRest {
+internal object IosAuthApi {
     suspend fun login(email: String, password: String): IosAuthSession {
         requireSupabaseConfiguration()
         val response = IosHttpClient.requestJson(

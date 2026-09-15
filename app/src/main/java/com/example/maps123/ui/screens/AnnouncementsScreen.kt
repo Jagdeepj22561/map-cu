@@ -159,7 +159,7 @@ fun AnnouncementsScreen(
 
     fun showAnnouncementRuleDialog() {
         announcementRuleDialogMessage =
-            "Posting limit reached.\n\nThis action is currently blocked by your Firebase announcement rules. Try again after your server-side reset window."
+            "Posting limit reached.\n\nThis action is currently blocked by the server posting policy. Try again after the reset window."
     }
 
     PureAnnouncementsScreen(

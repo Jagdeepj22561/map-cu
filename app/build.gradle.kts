@@ -23,10 +23,11 @@ plugins {
     alias(libs.plugins.ksp)
     id("org.jetbrains.kotlin.plugin.serialization")
     id("com.google.gms.google-services")
+    id("androidx.room")
 }
 android {
     namespace = "com.example.maps123"
-    compileSdk = 36 // Changed to 35 (Standard for current tools)
+    compileSdk = 36
 
     defaultConfig {
         applicationId = "com.example.maps123"
@@ -38,7 +39,6 @@ android {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
         // Public client values only.  Keep SUPABASE_SERVICE_ROLE_KEY on Render.
-        buildConfigField("boolean", "USE_CUSTOM_CHAT_SERVER", (supabaseBuildProperty("USE_CUSTOM_CHAT_SERVER") == "true").toString())
         buildConfigField("String", "CUSTOM_CHAT_SERVER_URL", asBuildConfigString(supabaseBuildProperty("CUSTOM_CHAT_SERVER_URL")))
         buildConfigField(
             "String",
@@ -87,6 +87,10 @@ android {
     }
 }
 
+room {
+    schemaDirectory("$projectDir/schemas")
+}
+
 kotlin {
     compilerOptions {
         jvmTarget.set(JvmTarget.JVM_17)
@@ -111,6 +115,9 @@ dependencies {
     // Keep runtime and instrumentation-test classpaths on the same AndroidX
     // concurrent version (Espresso 3.7.0 requires 1.2.0).
     implementation("androidx.concurrent:concurrent-futures:1.2.0")
+    // Play Services still exposes Fragment transitively; pin the supported
+    // release so Activity Result APIs do not run against Fragment 1.1.0.
+    implementation("androidx.fragment:fragment-ktx:1.9.0")
     implementation("com.google.android.gms:play-services-location:21.3.0")
     implementation(project(":shared"))
     // Navigation
@@ -152,4 +159,35 @@ dependencies {
     androidTestImplementation(libs.androidx.ui.test.junit4)
     debugImplementation(libs.androidx.ui.tooling)
     debugImplementation(libs.androidx.ui.test.manifest)
+}
+
+val verifyChatTransportBoundary by tasks.registering {
+    group = "verification"
+    description = "Prevents the retired client-side Supabase message transport from returning."
+    doLast {
+        val transportSources = fileTree("src/main/java") {
+            include("**/*.kt")
+        }.files
+        val forbidden = listOf(
+            "USE_CUSTOM_CHAT_SERVER",
+            "from(\"messages\")",
+            "table = \"messages\"",
+            "data[\"content\"]",
+            "data[\"senderId\"]"
+        )
+        val violations = transportSources.flatMap { source ->
+            source.readLines().flatMapIndexed { index, line ->
+                forbidden.filter(line::contains).map { token ->
+                    "${source.relativeTo(projectDir)}:${index + 1}: forbidden legacy chat token $token"
+                }
+            }
+        }
+        check(violations.isEmpty()) {
+            "Chat transport boundary violations:\n${violations.joinToString("\n")}"
+        }
+    }
+}
+
+tasks.matching { it.name == "check" }.configureEach {
+    dependsOn(verifyChatTransportBoundary)
 }

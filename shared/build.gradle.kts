@@ -64,6 +64,9 @@ kotlin {
             isStatic = true
         }
         pod("GoogleMaps")
+        // Temporary until the iOS social/chat repository is migrated from Firestore.
+        pod("FirebaseCore")
+        pod("FirebaseFirestore")
     }
 
     iosX64 {

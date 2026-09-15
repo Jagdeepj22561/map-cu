@@ -17,7 +17,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
-import com.example.shared.repository.IosFirebaseRest
+import com.example.shared.repository.IosAuthApi
 import com.example.shared.repository.IosPreferencesStore
 import com.example.shared.repository.IosUserStore
 import com.example.shared.repository.ChatRepository
@@ -76,7 +76,7 @@ internal fun LoginRoute(
                     status = ""
                     scope.launch {
                         runCatching {
-                            val session = IosFirebaseRest.login(normalizedEmail, password)
+                            val session = IosAuthApi.login(normalizedEmail, password)
                             ChatRepository().resetSessionState()
                             val user = runCatching {
                                 IosUserStore.refreshCurrentUser()
@@ -102,7 +102,7 @@ internal fun LoginRoute(
                 loading = true
                 scope.launch {
                     runCatching {
-                        IosFirebaseRest.sendPasswordReset(normalizedEmail)
+                        IosAuthApi.sendPasswordReset(normalizedEmail)
                         status = "Password reset email sent"
                     }.onFailure { error ->
                         status = error.message ?: "Failed to send reset email"

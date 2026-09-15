@@ -68,7 +68,6 @@ fun ChatDetailScreen(
     var isBlocked by remember { mutableStateOf(false) }
     var isSearchActive by remember { mutableStateOf(false) }
     var searchChatQuery by remember { mutableStateOf("") }
-    var loadingMore by remember { mutableStateOf(false) }
     var fullScreenImageUrl by remember { mutableStateOf<String?>(null) }
     var pendingImageUri by remember { mutableStateOf<Uri?>(null) }
     var pendingImageCaption by remember { mutableStateOf("") }
@@ -87,7 +86,7 @@ fun ChatDetailScreen(
     LaunchedEffect(chatId) {
         runCatching {
             repo.setActiveChat(chatId)
-            repo.fetchNewMessages(chatId)
+            repo.fetchNewMessages()
         }.onFailure {
             Toast.makeText(context, it.message ?: "Failed to load chat", Toast.LENGTH_SHORT).show()
         }
@@ -105,23 +104,6 @@ fun ChatDetailScreen(
     DisposableEffect(chatId) {
         onDispose {
             repo.setActiveChat(null)
-        }
-    }
-
-    val loadMoreCallback = remember(chatId, loadingMore, messages.size) {
-        {
-            if (!loadingMore && messages.isNotEmpty()) {
-                loadingMore = true
-                scope.launch {
-                    val oldestMessage = messages.minByOrNull { it.timestamp }
-                    if (oldestMessage != null) {
-                        runCatching {
-                            repo.loadOlderMessages(chatId, oldestMessage.timestamp)
-                        }
-                    }
-                    loadingMore = false
-                }
-            }
         }
     }
 
@@ -149,14 +131,10 @@ fun ChatDetailScreen(
         onPickImage = {
             picker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
         },
-        onDeleteMessages = { ids, isForEveryone ->
+        onDeleteMessages = { ids, _ ->
             scope.launch {
                 try {
-                    if (isForEveryone) {
-                        repo.deleteMessagesForEveryone(chatId, ids.toList())
-                    } else {
-                        repo.deleteMessagesLocally(ids.toList())
-                    }
+                    repo.deleteMessagesLocally(ids.toList())
                     Toast.makeText(context, "Deleted", Toast.LENGTH_SHORT).show()
                 } catch (e: Exception) {
                     Toast.makeText(context, "Failed", Toast.LENGTH_SHORT).show()
@@ -168,16 +146,7 @@ fun ChatDetailScreen(
             clipboardManager.setText(AnnotatedString(text))
             Toast.makeText(context, "Copied", Toast.LENGTH_SHORT).show()
         },
-        onEditMessage = { messageId, newContent ->
-            scope.launch {
-                try {
-                    repo.editMessage(chatId, messageId, newContent)
-                    Toast.makeText(context, "Message updated", Toast.LENGTH_SHORT).show()
-                } catch (e: Exception) {
-                    Toast.makeText(context, e.message ?: "Failed", Toast.LENGTH_SHORT).show()
-                }
-            }
-        },
+        onEditMessage = { _, _ -> },
         onBlockUser = {
             scope.launch {
                 try {
@@ -230,11 +199,8 @@ fun ChatDetailScreen(
         renderImage = { url, modifier, scale ->
             AppAsyncImage(model = url, contentDescription = null, modifier = modifier, contentScale = scale)
         },
-        canEditMessage = { message ->
-            !com.example.maps123.BuildConfig.USE_CUSTOM_CHAT_SERVER && System.currentTimeMillis() - message.timestamp < 2 * 60 * 1000
-        },
-        canDeleteForEveryone = !com.example.maps123.BuildConfig.USE_CUSTOM_CHAT_SERVER,
-        onLoadMore = loadMoreCallback,
+        canEditMessage = { false },
+        canDeleteForEveryone = false,
         onImageClick = { imageUrl ->
             fullScreenImageUrl = imageUrl
         }

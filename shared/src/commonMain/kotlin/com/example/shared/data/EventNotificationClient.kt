@@ -8,6 +8,8 @@ import io.ktor.client.request.setBody
 import io.ktor.http.ContentType
 import io.ktor.http.HttpHeaders
 import io.ktor.http.contentType
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.delay
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 
@@ -21,20 +23,32 @@ import kotlinx.serialization.json.put
 object EventNotificationClient {
     private val httpClient by lazy { HttpClient() }
 
-    suspend fun dispatch(kind: String, resourceId: String) {
+    suspend fun dispatch(kind: String, resourceId: String): Boolean {
         val baseUrl = NotificationBackendConfig.url.trimEnd('/')
-        if (baseUrl.isBlank() || resourceId.isBlank()) return
-        val accessToken = SupabaseClientProvider.client.auth.currentSessionOrNull()?.accessToken ?: return
+        if (baseUrl.isBlank() || resourceId.isBlank()) return false
+        val accessToken = SupabaseClientProvider.client.auth.currentSessionOrNull()?.accessToken ?: return false
 
-        runCatching {
-            httpClient.post("$baseUrl/notifications/event") {
-                header(HttpHeaders.Authorization, "Bearer $accessToken")
-                contentType(ContentType.Application.Json)
-                setBody(buildJsonObject {
-                    put("kind", kind)
-                    put("resourceId", resourceId)
-                }.toString())
+        repeat(MAX_ATTEMPTS) { attempt ->
+            try {
+                val response = httpClient.post("$baseUrl/notifications/event") {
+                    header(HttpHeaders.Authorization, "Bearer $accessToken")
+                    contentType(ContentType.Application.Json)
+                    setBody(buildJsonObject {
+                        put("kind", kind)
+                        put("resourceId", resourceId)
+                    }.toString())
+                }
+                if (response.status.value in 200..299) return true
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Throwable) {
+                // A later attempt can recover from a Render cold start or a brief network outage.
             }
+            if (attempt < MAX_ATTEMPTS - 1) delay(RETRY_DELAY_MS * (attempt + 1))
         }
+        return false
     }
+
+    private const val MAX_ATTEMPTS = 3
+    private const val RETRY_DELAY_MS = 1_000L
 }

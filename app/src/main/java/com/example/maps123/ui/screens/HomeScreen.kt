@@ -221,7 +221,7 @@ fun HomeScreen(
             var chat = runCatching {
                 AppDatabase.getInstance(context).chatDao().getChat(pendingChatId)
             }.getOrNull()
-            if (chat == null && com.example.maps123.BuildConfig.USE_CUSTOM_CHAT_SERVER) {
+            if (chat == null) {
                 val mine = AuthRepository.currentUserId()
                 val friend = friends.firstOrNull { mine != null && chatRepository.getChatId(mine, it.uid) == pendingChatId }
                 if (friend != null) {

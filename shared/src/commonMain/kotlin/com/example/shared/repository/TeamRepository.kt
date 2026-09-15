@@ -428,53 +428,14 @@ class TeamRepository {
     }
 
     suspend fun approveJoinRequest(requestId: String) {
-        val uid = client.auth.currentUserOrNull()?.id ?: error("Login required")
-        // Try atomic RPC first
-        val rpcResult = runCatching {
-            client.postgrest.rpc("approve_join_request", RequestIdParam(requestId))
-        }
-        if (rpcResult.isSuccess) {
-            EventNotificationClient.dispatch("team_join_approved", requestId)
-            return
-        }
-
-        // Fallback: direct table operations
-        val request = client.from("join_requests").select {
-            filter { eq("id", requestId) }
-        }.decodeSingle<JoinRequestRow>()
-
-        client.from("join_requests").update({
-            set("status", "approved")
-            set("reviewed_by", uid)
-        }) { filter { eq("id", requestId) } }
-
-        runCatching {
-            client.from("event_team_members").insert(MemberInsert(request.teamId, request.requesterId))
-        }.onFailure { err ->
-            val msg = err.message.orEmpty()
-            if (msg.contains("duplicate", ignoreCase = true) || msg.contains("unique", ignoreCase = true)) {
-                // Member already in team, ignore
-            } else {
-                throw err
-            }
-        }
+        client.auth.currentUserOrNull()?.id ?: error("Login required")
+        client.postgrest.rpc("approve_join_request", RequestIdParam(requestId))
         EventNotificationClient.dispatch("team_join_approved", requestId)
     }
 
     suspend fun rejectJoinRequest(requestId: String) {
-        val uid = client.auth.currentUserOrNull()?.id ?: error("Login required")
-        val rpcResult = runCatching {
-            client.postgrest.rpc("reject_join_request", RequestIdParam(requestId))
-        }
-        if (rpcResult.isSuccess) {
-            EventNotificationClient.dispatch("team_join_rejected", requestId)
-            return
-        }
-
-        client.from("join_requests").update({
-            set("status", "rejected")
-            set("reviewed_by", uid)
-        }) { filter { eq("id", requestId) } }
+        client.auth.currentUserOrNull()?.id ?: error("Login required")
+        client.postgrest.rpc("reject_join_request", RequestIdParam(requestId))
         EventNotificationClient.dispatch("team_join_rejected", requestId)
     }
 

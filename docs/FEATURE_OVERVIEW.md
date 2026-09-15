@@ -97,11 +97,10 @@ The repository contains:
 - Search conversations and messages.
 - Text and image messages.
 - Image preview before sending and full-screen image viewing.
-- Local Room message cache and background Supabase synchronization.
-- Pagination for older messages and explicit read-state updates.
+- Local Room message history and outgoing-message outbox.
+- Authenticated Render WebSocket delivery with a server-only temporary Supabase queue.
 - Copy messages.
-- Edit recently sent messages (currently limited to a two-minute window in the Android UI).
-- Delete selected messages locally or for everyone.
+- Delete selected messages from the local device.
 - Clear a conversation or remove it from the local chat list.
 - Block and unblock users.
 - Report chat/user activity from the conversation UI.
@@ -159,13 +158,13 @@ The repository contains:
 ## 12. Data, offline behavior, and security
 
 - Supabase Auth, PostgREST, Realtime, and Storage clients.
-- PostgreSQL tables for profiles, announcements, likes, comments, reports, friendships, friend requests, direct chats, messages, groups, blocks, event teams, team requirements, and device tokens.
+- PostgreSQL tables for profiles, announcements, likes, comments, reports, friendships, friend requests, groups, blocks, event teams, team requirements, device tokens, and the server-only temporary chat delivery queue. Retired direct-message tables may remain for historical data but are not a mobile API.
 - Row Level Security policies and database functions for protected social operations.
 - Room database on Android for routes, places, users/profiles, announcements, chats, messages, and friend requests.
 - Preloaded place and route data.
 - Cached feeds, profiles, chats, and messages to reduce startup/network latency.
 - FCM device-token synchronization.
-- Authenticated image-upload endpoint with MIME/type checks and a 5 MB limit.
+- API-key-protected image-upload endpoint with MIME/type checks and a 5 MB limit; verified user authentication remains required work.
 - Backend-wide request rate limiting.
 - The Supabase service-role key remains server-side; mobile clients receive only public client configuration.
 
@@ -177,7 +176,7 @@ Android is the most complete host. It wires together maps, navigation, authentic
 
 ### iOS
 
-The iOS target uses the Kotlin Multiplatform shared module and includes shared Compose screens, Supabase-backed authentication/social repositories, a Google Maps host, map/location support, navigation, chat, communities, announcements, profiles, settings, and iOS platform integrations. Some Android-specific behavior—most notably Room storage and Firebase message notification handling—is implemented differently or is not present in the iOS host.
+The iOS target uses the Kotlin Multiplatform shared module and includes shared Compose screens, Supabase authentication/profile paths, a Google Maps host, navigation, announcements, profiles, settings, and iOS integrations. Its chat, friends, and legacy group repository still use Firestore and are not yet compatible with Android's custom direct-chat transport.
 
 ## 14. External services and required configuration
 
@@ -199,4 +198,3 @@ The iOS target uses the Kotlin Multiplatform shared module and includes shared C
 - Several route names display mojibake (`â†’`) in source text and should be normalized to the proper arrow character or plain `->`.
 - The Google Maps API key is currently embedded directly in `AndroidManifest.xml`; it should be restricted in Google Cloud and preferably injected through build configuration.
 - Automated tests are currently only template/sample tests, so feature behavior is mostly verified through implementation and manual testing rather than a broad automated suite.
-

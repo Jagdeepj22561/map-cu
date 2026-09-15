@@ -9,15 +9,8 @@ import android.os.Build
 import androidx.core.app.NotificationCompat
 import com.example.maps123.MainActivity
 import com.example.maps123.data.firebase.FcmTokenSyncManager
-import com.example.maps123.data.local.AppDatabase
-import com.example.maps123.data.local.MessageEntity
 import com.google.firebase.messaging.FirebaseMessagingService
 import com.google.firebase.messaging.RemoteMessage
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.runBlocking
-import java.util.UUID
 
 class MyFirebaseMessagingService : FirebaseMessagingService() {
 
@@ -26,8 +19,8 @@ class MyFirebaseMessagingService : FirebaseMessagingService() {
 
         val data = remoteMessage.data
         if (data["kind"] == "custom_chat") {
-            // Broadcast posts have no per-user recipient id; targeted team
-            // updates do, and must match the signed-in account.
+            // Ignore a targeted message if Android is currently signed in as
+            // a different account. Older chat payloads may omit this field.
             data["recipientId"]?.let { recipientId ->
                 if (recipientId != com.example.maps123.data.repository.AuthRepository.currentUserId()) return
             }
@@ -36,8 +29,17 @@ class MyFirebaseMessagingService : FirebaseMessagingService() {
             }
             return
         }
+        if (data["kind"] == "post_created") {
+            val postId = data["deep_link_post_id"] ?: return
+            showCampusNotification(
+                notificationId = "$postId:post_created".hashCode(),
+                postId = postId,
+                title = remoteMessage.notification?.title ?: "New campus post",
+                body = remoteMessage.notification?.body ?: "Open Campus Map to view it"
+            )
+            return
+        }
         if (data["kind"] in setOf(
-                "post_created",
                 "team_join_requested",
                 "team_join_approved",
                 "team_join_rejected",
@@ -68,21 +70,6 @@ class MyFirebaseMessagingService : FirebaseMessagingService() {
                 body = remoteMessage.notification?.body ?: "Open Campus Map to view it"
             )
             return
-        }
-        val chatId = data["chatId"]
-        val senderId = data["senderId"]
-        val content = data["content"]
-        val type = data["type"] ?: "TEXT"
-        val imageUrl = data["imageUrl"]
-        val senderName = data["senderName"]
-
-        if (chatId != null && senderId != null && content != null) {
-            insertMessageLocally(chatId, senderId, content, type, imageUrl)
-            showChatNotification(
-                chatId = chatId,
-                title = senderName ?: "New Message",
-                body = if (type == "IMAGE" && content.isBlank()) "Sent an image" else content
-            )
         }
     }
 
@@ -187,31 +174,4 @@ class MyFirebaseMessagingService : FirebaseMessagingService() {
         )
     }
 
-    private fun insertMessageLocally(
-        chatId: String,
-        senderId: String,
-        content: String,
-        type: String,
-        imageUrl: String?
-    ) {
-        val db = AppDatabase.getInstance(applicationContext)
-        val chatDao = db.chatDao()
-
-        CoroutineScope(Dispatchers.IO).launch {
-            chatDao.insertMessage(
-                MessageEntity(
-                    messageId = UUID.randomUUID().toString(),
-                    chatId = chatId,
-                    senderId = senderId,
-                    content = content,
-                    timestamp = System.currentTimeMillis(),
-                    isRead = false,
-                    isSynced = true,
-                    imageUrl = imageUrl,
-                    type = type
-                )
-            )
-            chatDao.incrementUnreadCount(chatId)
-        }
-    }
 }

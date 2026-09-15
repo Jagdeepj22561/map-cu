@@ -11,7 +11,7 @@ import com.example.shared.model.PureMessage
 @Entity(tableName = "chats",
     indices = [Index(value = ["chatId"], unique = true)])
 data class ChatEntity(
-    @PrimaryKey val chatId: String, // Usually combination of UID1_UID2 (sorted)
+    @PrimaryKey val chatId: String, // Deterministic UUID derived from the sorted user IDs.
     val friendUid: String,
     val friendName: String,
     val friendProfilePicUrl: String? = null,
