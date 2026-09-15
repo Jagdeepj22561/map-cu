@@ -214,19 +214,26 @@ fun HomeScreen(
     var selectedFriendUid by rememberSaveable { mutableStateOf<String?>(null) }
     var selectedFriendName by rememberSaveable { mutableStateOf<String?>(null) }
     var selectedFriendPicUrl by rememberSaveable { mutableStateOf<String?>(null) }
+    val localChats by chatRepository.allChats.collectAsState(initial = emptyList())
 
-    // Handle notification deep link to open specific chat
-    LaunchedEffect(pendingChatId, friends) {
-        if (pendingChatId != null && pendingChatId.isNotBlank() && friends.isNotEmpty()) {
-            var chat = runCatching {
-                AppDatabase.getInstance(context).chatDao().getChat(pendingChatId)
-            }.getOrNull()
+    // The notification can open Android before the socket has drained the
+    // queued message into Room. Observe allChats so this runs again as soon as
+    // delivery creates/updates the conversation instead of losing the route.
+    LaunchedEffect(pendingChatId, friends, localChats) {
+        if (!pendingChatId.isNullOrBlank()) {
+            var chat = localChats.firstOrNull { it.chatId == pendingChatId }
             if (chat == null) {
                 val mine = AuthRepository.currentUserId()
                 val friend = friends.firstOrNull { mine != null && chatRepository.getChatId(mine, it.uid) == pendingChatId }
                 if (friend != null) {
-                    chat = com.example.maps123.data.local.ChatEntity(pendingChatId, friend.uid, friend.name,
-                        friend.profilePicUrl, lastMessage = "", lastMessageTime = 0)
+                    chat = com.example.shared.model.PureChat(
+                        chatId = pendingChatId,
+                        friendUid = friend.uid,
+                        friendName = friend.name,
+                        friendProfilePicUrl = friend.profilePicUrl,
+                        lastMessage = "",
+                        lastMessageTime = 0
+                    )
                 }
             }
             
