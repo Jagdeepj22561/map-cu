@@ -14,6 +14,8 @@ import kotlinx.coroutines.channels.Channel
 import okhttp3.*
 import org.json.JSONObject
 import java.time.Instant
+import java.time.OffsetDateTime
+import java.time.format.DateTimeFormatter
 import java.util.concurrent.TimeUnit
 
 /** One foreground socket, independent of the selected screen. Room is the outbox/history. */
@@ -111,7 +113,7 @@ class CustomChatClient(private val context: Context) {
                             val id = row.getString("id")
                             val chatId = row.getString("chat_id")
                             val senderId = row.getString("sender_id")
-                            val timestamp = Instant.parse(row.getString("created_at")).toEpochMilli()
+                            val timestamp = parseServerTimestamp(row.getString("created_at"))
                             val content = row.optString("content", "")
                             val image = if (row.isNull("image_url")) null else row.getString("image_url")
                             db.withTransaction {
@@ -161,5 +163,24 @@ class CustomChatClient(private val context: Context) {
         const val DELIVERY_TTL_MS = 72 * 60 * 60 * 1000L
         private val http = OkHttpClient.Builder().pingInterval(25, TimeUnit.SECONDS)
             .connectTimeout(90, TimeUnit.SECONDS).readTimeout(0, TimeUnit.SECONDS).build()
+
+        /**
+         * PostgREST may return PostgreSQL timestamps with a space separator
+         * (for example `2026-09-15 12:34:56.123456+00`).  Instant.parse only
+         * accepts the ISO `T`/`Z` form, so one queued message used to tear down
+         * the whole socket before either device could send or receive anything.
+         */
+        internal fun parseServerTimestamp(value: String): Long {
+            val normalized = value.trim().replace(' ', 'T')
+            return runCatching { Instant.parse(normalized).toEpochMilli() }
+                .recoverCatching {
+                    OffsetDateTime.parse(normalized, DateTimeFormatter.ISO_OFFSET_DATE_TIME)
+                        .toInstant().toEpochMilli()
+                }
+                .getOrElse {
+                    Log.w(TAG, "Server supplied an invalid message timestamp; using receipt time")
+                    System.currentTimeMillis()
+                }
+        }
     }
 }
