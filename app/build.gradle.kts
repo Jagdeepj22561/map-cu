@@ -22,7 +22,15 @@ plugins {
     alias(libs.plugins.kotlin.compose)
     alias(libs.plugins.ksp)
     id("org.jetbrains.kotlin.plugin.serialization")
-    id("com.google.gms.google-services")
+    alias(libs.plugins.google.services) apply false
+}
+
+// A fresh clone does not contain the private Firebase configuration. Keep local
+// Android builds usable; adding app/google-services.json enables FCM again.
+if (file("google-services.json").isFile) {
+    apply(plugin = "com.google.gms.google-services")
+} else {
+    logger.warn("app/google-services.json is missing; Firebase push notifications are disabled.")
 }
 android {
     namespace = "com.example.maps123"

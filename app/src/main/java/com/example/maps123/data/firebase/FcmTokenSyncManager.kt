@@ -3,6 +3,7 @@ package com.example.maps123.data.firebase
 import android.content.Context
 import com.example.maps123.data.repository.AuthRepository
 import com.example.maps123.data.supabase.SupabaseProvider
+import com.google.firebase.FirebaseApp
 import com.google.firebase.messaging.FirebaseMessaging
 import io.github.jan.supabase.postgrest.from
 import kotlinx.coroutines.CoroutineScope
@@ -21,6 +22,7 @@ object FcmTokenSyncManager {
 
     fun syncCurrentToken(context: Context) {
         val uid = AuthRepository.currentUserId() ?: return
+        if (FirebaseApp.getApps(context).isEmpty()) return
         FirebaseMessaging.getInstance().token.addOnCompleteListener { task ->
             if (!task.isSuccessful) return@addOnCompleteListener
             if (AuthRepository.currentUserId() != uid) return@addOnCompleteListener
