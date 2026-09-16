@@ -475,7 +475,9 @@ class ChatRepository(private val context: Context) : IChatRepository {
             .decodeList<FriendRequestRow>()
 
         val incoming = rows.firstOrNull { it.senderId == otherUid && it.receiverId == mine }
-        if (incoming?.status == "pending") return ChatRequestState("pending", incoming = true)
+        if (incoming != null && incoming.status in setOf("pending", "rejected")) {
+            return ChatRequestState(incoming.status, incoming = true)
+        }
 
         val outgoing = rows.firstOrNull { it.senderId == mine && it.receiverId == otherUid }
         if (outgoing != null && outgoing.status in setOf("pending", "rejected")) {

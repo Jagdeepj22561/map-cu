@@ -279,6 +279,18 @@ fun ChatDetailScreen(
                             }
                         }
                     }
+                    state.status == "rejected" -> Card(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 12.dp, vertical = 8.dp)
+                    ) {
+                        Text(
+                            "Message request declined. You cannot send messages in this chat.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.error,
+                            modifier = Modifier.padding(12.dp)
+                        )
+                    }
                     !state.incoming && state.status == "pending" -> Card(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -288,18 +300,6 @@ fun ChatDetailScreen(
                             "Message request sent. You can send one message until it is accepted.",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.padding(12.dp)
-                        )
-                    }
-                    !state.incoming && state.status == "rejected" -> Card(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 12.dp, vertical = 8.dp)
-                    ) {
-                        Text(
-                            "Message request declined. You cannot send more messages.",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.error,
                             modifier = Modifier.padding(12.dp)
                         )
                     }
