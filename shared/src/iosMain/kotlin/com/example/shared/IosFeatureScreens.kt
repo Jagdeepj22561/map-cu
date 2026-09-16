@@ -128,12 +128,10 @@ internal fun IosChatDetailContent(
         onPickImage = {
             errorMessage = "Image upload is not wired to the native iOS picker yet"
         },
-        onDeleteMessages = { ids, isForEveryone ->
+        onDeleteMessages = { ids, _ ->
             scope.launch {
-                runCatching {
-                    if (isForEveryone) repository.deleteMessagesForEveryone(chat.chatId, ids.toList())
-                    else repository.deleteMessagesLocally(ids.toList())
-                }.onFailure { errorMessage = it.message ?: "Failed to delete message" }
+                runCatching { repository.deleteMessagesLocally(ids.toList()) }
+                    .onFailure { errorMessage = it.message ?: "Failed to delete message" }
             }
         },
         onCopyMessages = { ids ->
@@ -176,6 +174,8 @@ internal fun IosChatDetailContent(
         formatTime = ::iosRelativeTime,
         formatDateHeader = ::iosDateHeader,
         onOpenPostLink = {},
+        canEditMessage = { false },
+        canDeleteForEveryone = false,
         requestBanner = {
             requestState?.let { state ->
                 when {

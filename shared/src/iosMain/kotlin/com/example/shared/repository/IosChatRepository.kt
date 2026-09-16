@@ -58,10 +58,28 @@ private data class IosBasicProfileRow(
 )
 
 @Serializable
+private data class IosNearbyProfileRow(
+    val id: String,
+    val email: String = "",
+    val name: String = "",
+    @SerialName("profile_pic_url") val profilePicUrl: String? = null,
+    @SerialName("last_updated") val lastUpdated: Long = 0L,
+    @SerialName("latitude") val latitude: Double = 0.0,
+    @SerialName("longitude") val longitude: Double = 0.0,
+    @SerialName("ghost_mode") val ghostMode: Boolean = false
+)
+
+@Serializable
 private data class IosFriendRequestInsert(
     @SerialName("sender_id") val senderId: String,
     @SerialName("receiver_id") val receiverId: String,
     val status: String = "pending"
+)
+
+@Serializable
+private data class IosBlockRow(
+    @SerialName("user_id") val userId: String,
+    @SerialName("blocked_user_id") val blockedUserId: String
 )
 
 private object IosChatStore {
@@ -178,7 +196,10 @@ private object IosChatStore {
         ensureLocalCacheLoaded()
         val uid = currentUid() ?: return
         syncFriendsAndRequests(uid)
-        syncChats(uid)
+        // Direct chat delivery is handled by IosCustomChatClient. Do not
+        // poll the retired Firestore chat collections here; doing so can
+        // overwrite newer socket-delivered messages and reintroduce the old
+        // read/write path.
     }
 
     /** Apply custom-server deliveries to the same observable cache used by iOS UI. */
@@ -394,34 +415,37 @@ private object IosChatStore {
 
     suspend fun getNearbyUsers(lat: Double, lng: Double): List<PureUser> {
         val uid = currentUid() ?: return emptyList()
-        val snapshot = suspendCancellableCoroutine<FIRQuerySnapshot?> { continuation ->
-            IosFirestoreRefs.users.getDocumentsWithCompletion { snapshot, error ->
-                if (error != null) continuation.resumeWithException(Throwable(error.toString()))
-                else continuation.resume(snapshot)
+        val profiles = SupabaseClientProvider.client.from("profiles").select {
+            limit(50)
+        }.decodeList<IosNearbyProfileRow>()
+        return profiles.asSequence()
+            .filter { it.id != uid && !it.ghostMode }
+            .mapNotNull { profile ->
+                if (profile.latitude == 0.0 && profile.longitude == 0.0) return@mapNotNull null
+                val location = GeoPoint(profile.latitude, profile.longitude)
+                val distance = GeoUtils.distanceMeters(GeoPoint(lat, lng), location)
+                if (distance > 10_000.0) return@mapNotNull null
+                PureUser(
+                    uid = profile.id,
+                    email = profile.email,
+                    name = profile.name,
+                    profilePicUrl = profile.profilePicUrl.orEmpty(),
+                    lastUpdated = profile.lastUpdated,
+                    location = location,
+                    distanceMeters = distance
+                )
             }
-        }
-        return snapshot?.documents?.mapNotNull { doc ->
-            (doc as? FIRDocumentSnapshot)?.data()?.asStringMap()?.toIosUserProfile(doc.documentID)
-        }?.filter { profile ->
-            profile.uid != uid &&
-                !profile.ghostMode &&
-                profile.location != null &&
-                GeoUtils.distanceMeters(GeoPoint(lat, lng), profile.location) <= 10_000.0
-        }?.map { it.toPureUser() } ?: emptyList()
+            .sortedBy { it.distanceMeters ?: Double.MAX_VALUE }
+            .toList()
     }
 
     suspend fun toggleGhostMode(isGhostMode: Boolean) {
         val uid = currentUid() ?: throw Exception("Not logged in")
-        suspendCancellableCoroutine<Unit> { continuation ->
-            IosFirestoreRefs.user(uid).updateData(
-                mapOf(
-                    "ghostMode" to isGhostMode,
-                    "lastUpdated" to currentTimeMillis()
-                ) as Map<Any?, *>
-            ) { error ->
-                if (error != null) continuation.resumeWithException(Throwable(error.toString()))
-                else continuation.resume(Unit)
-            }
+        SupabaseClientProvider.client.from("profiles").update({
+            set("ghost_mode", isGhostMode)
+            set("last_updated", currentTimeMillis())
+        }) {
+            filter { eq("id", uid) }
         }
         IosUserStore.getUser(uid)
     }
@@ -578,37 +602,8 @@ private object IosChatStore {
             .sortedByDescending { it.lastMessageTime }
         persistChats()
 
-        val chatSnap = suspendCancellableCoroutine<FIRDocumentSnapshot?> { continuation ->
-            IosFirestoreRefs.userChats(uid).documentWithPath(chatId)
-                .getDocumentWithCompletion { snapshot, error ->
-                    if (error != null) continuation.resumeWithException(Throwable(error.toString()))
-                    else continuation.resume(snapshot)
-                }
-        }
-        
-        if (chatSnap?.exists() != true) {
-            val payload = mapOf(
-                "chatId" to chatId,
-                "friendUid" to friendUid,
-                "lastMessage" to "New chat started",
-                "lastMessageTime" to now,
-                "lastSenderUid" to uid
-            )
-            suspendCancellableCoroutine<Unit> { continuation ->
-                IosFirestoreRefs.userChats(uid).documentWithPath(chatId)
-                    .setData(payload as Map<Any?, *>) { error ->
-                        if (error != null) continuation.resumeWithException(Throwable(error.toString()))
-                        else continuation.resume(Unit)
-                    }
-            }
-            suspendCancellableCoroutine<Unit> { continuation ->
-                IosFirestoreRefs.userChats(friendUid).documentWithPath(chatId)
-                    .setData((payload + ("friendUid" to uid)) as Map<Any?, *>) { error ->
-                        if (error != null) continuation.resumeWithException(Throwable(error.toString()))
-                        else continuation.resume(Unit)
-                    }
-            }
-        }
+        // Chat metadata is local-only. The custom server creates the
+        // recipient's conversation when the first message is delivered.
         return chatId
     }
 
@@ -897,17 +892,6 @@ private object IosChatStore {
         lastReadChats[chatId] = currentTimeMillis()
         persistLongMap(lastReadChatsKey, lastReadChats)
         val messages = messagesFlow(chatId).value
-        messages.filter { it.senderId != uid && !it.isRead }.forEach { message ->
-            runCatching {
-                suspendCancellableCoroutine<Unit> { continuation ->
-                    IosFirestoreRefs.chatMessages(chatId).documentWithPath(message.messageId)
-                        .updateData(mapOf("seen" to true) as Map<Any?, *>) { error ->
-                            if (error != null) continuation.resumeWithException(Throwable(error.toString()))
-                            else continuation.resume(Unit)
-                        }
-                }
-            }
-        }
         updateChatMessages(
             chatId,
             messages.map { message ->
@@ -955,14 +939,7 @@ private object IosChatStore {
     }
 
     suspend fun deleteChat(chatId: String) {
-        val uid = currentUid() ?: return
-        suspendCancellableCoroutine<Unit> { continuation ->
-            IosFirestoreRefs.userChats(uid).documentWithPath(chatId)
-                .deleteDocumentWithCompletion { error ->
-                    if (error != null) continuation.resumeWithException(Throwable(error.toString()))
-                    else continuation.resume(Unit)
-                }
-        }
+        currentUid() ?: return
         chats.value = chats.value.filterNot { it.chatId == chatId }
         persistChats()
         updateChatMessages(chatId, emptyList())
@@ -1070,50 +1047,28 @@ private object IosChatStore {
 
     suspend fun blockUser(friendUid: String) {
         val uid = currentUid() ?: throw Exception("Not logged in")
-        suspendCancellableCoroutine<Unit> { continuation ->
-            IosFirestoreRefs.userBlocks(uid).documentWithPath(friendUid)
-                .setData(mapOf("uid" to friendUid, "createdAt" to currentTimeMillis()) as Map<Any?, *>) { error ->
-                    if (error != null) continuation.resumeWithException(Throwable(error.toString()))
-                    else continuation.resume(Unit)
-                }
-        }
+        SupabaseClientProvider.client.from("blocks").upsert(IosBlockRow(uid, friendUid))
     }
 
     suspend fun unblockUser(friendUid: String) {
         val uid = currentUid() ?: throw Exception("Not logged in")
-        suspendCancellableCoroutine<Unit> { continuation ->
-            IosFirestoreRefs.userBlocks(uid).documentWithPath(friendUid)
-                .deleteDocumentWithCompletion { error ->
-                    if (error != null) continuation.resumeWithException(Throwable(error.toString()))
-                    else continuation.resume(Unit)
-                }
+        SupabaseClientProvider.client.from("blocks").delete {
+            filter { eq("user_id", uid); eq("blocked_user_id", friendUid) }
         }
     }
 
     suspend fun isUserBlocked(friendUid: String): Boolean {
         val uid = currentUid() ?: return false
-        val iBlocked = runCatching {
-            val doc = suspendCancellableCoroutine<FIRDocumentSnapshot?> { continuation ->
-                IosFirestoreRefs.userBlocks(uid).documentWithPath(friendUid)
-                    .getDocumentWithCompletion { snapshot, error ->
-                        if (error != null) continuation.resumeWithException(Throwable(error.toString()))
-                        else continuation.resume(snapshot)
-                    }
+        val rows = SupabaseClientProvider.client.from("blocks").select {
+            filter {
+                or {
+                    and { eq("user_id", uid); eq("blocked_user_id", friendUid) }
+                    and { eq("user_id", friendUid); eq("blocked_user_id", uid) }
+                }
             }
-            doc?.exists() == true
-        }.getOrDefault(false)
-        if (iBlocked) return true
-        
-        return runCatching {
-            val doc = suspendCancellableCoroutine<FIRDocumentSnapshot?> { continuation ->
-                IosFirestoreRefs.userBlocks(friendUid).documentWithPath(uid)
-                    .getDocumentWithCompletion { snapshot, error ->
-                        if (error != null) continuation.resumeWithException(Throwable(error.toString()))
-                        else continuation.resume(snapshot)
-                    }
-            }
-            doc?.exists() == true
-        }.getOrDefault(false)
+            limit(1)
+        }.decodeList<IosBlockRow>()
+        return rows.isNotEmpty()
     }
 
     suspend fun getGroup(groupId: String): PureGroup? {
