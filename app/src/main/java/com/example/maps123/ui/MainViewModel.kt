@@ -17,6 +17,7 @@ import com.example.maps123.ui.theme.ThemePrefs
 import com.google.android.gms.maps.model.LatLng
 import com.example.maps123.data.repository.AuthRepository
 import com.example.maps123.data.supabase.SupabaseProvider
+import com.example.shared.data.AuthSessionManager
 import io.github.jan.supabase.auth.auth
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -77,6 +78,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             try {
                 val auth = SupabaseProvider.client.auth
                 auth.awaitInitialization()
+                // Foregrounding can pause the SDK refresher on Android. Make
+                // one guarded refresh complete before the first PostgREST read.
+                AuthSessionManager.accessTokenOrNull()
                 if (auth.currentUserOrNull() == null) {
                     isChatInitialized = false
                     return@launch
