@@ -80,8 +80,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 auth.awaitInitialization()
                 // Foregrounding can pause the SDK refresher on Android. Make
                 // one guarded refresh complete before the first PostgREST read.
-                AuthSessionManager.accessTokenOrNull()
-                if (auth.currentUserOrNull() == null) {
+                val accessToken = AuthSessionManager.accessTokenOrNull()
+                if (accessToken.isNullOrBlank() || auth.currentUserOrNull() == null) {
+                    // Keep the persisted session; a later foreground pass can
+                    // retry when connectivity or Supabase has recovered.
                     isChatInitialized = false
                     return@launch
                 }
