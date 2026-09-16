@@ -47,15 +47,15 @@ internal class IosCustomChatClient {
                         .trimEnd('/') + "/chat"
                     http.webSocket(urlString = url) {
                         socket = this
-                        sendText(buildJsonObject {
+                        send(Frame.Text(buildJsonObject {
                             put("type", JsonPrimitive("auth"))
                             put("token", JsonPrimitive(token))
-                        }.toString())
+                        }.toString()))
                         backoff = 1_000L
                         val ready = CompletableDeferred<Unit>()
                         val writer = launch {
                             ready.await()
-                            for (packet in outbound) sendText(packet)
+                            for (packet in outbound) send(Frame.Text(packet))
                         }
                         try {
                             for (frame in incoming) {
