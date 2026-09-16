@@ -1,6 +1,7 @@
 package com.example.shared.data
 
 import io.github.jan.supabase.auth.auth
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlin.time.Clock
@@ -21,7 +22,13 @@ object AuthSessionManager {
         // Refresh slightly early so a request cannot cross the expiry boundary
         // while it is waiting on the network.
         if (session.expiresAt <= Clock.System.now() + 30.seconds) {
-            runCatching { auth.refreshCurrentSession() }.getOrElse { return@withLock null }
+            try {
+                auth.refreshCurrentSession()
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Throwable) {
+                return@withLock null
+            }
         }
         auth.currentSessionOrNull()?.accessToken
     }
