@@ -1,6 +1,11 @@
 package com.example.shared.ui
 
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.*
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
@@ -20,7 +25,10 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
@@ -52,8 +60,9 @@ fun PureAnnouncementCard(
         modifier = Modifier
             .fillMaxWidth()
             .then(if (onClick != null) Modifier.clickable { onClick() } else Modifier),
-        shape = RoundedCornerShape(16.dp),
+        shape = RoundedCornerShape(20.dp),
         elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f)),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
     ) {
         Column(
@@ -84,6 +93,9 @@ fun PureAnnouncementCard(
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Text(
                             text = announcement.author,
+                            modifier = Modifier.weight(1f, fill = false),
+                            maxLines = 1,
+                            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
                             fontWeight = FontWeight.SemiBold,
                             style = MaterialTheme.typography.bodyLarge,
                             color = MaterialTheme.colorScheme.onSurface
@@ -119,19 +131,18 @@ fun PureAnnouncementCard(
                 Box {
                     var showMenu by remember { mutableStateOf(false) }
                     
-                    IconButton(onClick = { showMenu = true }, modifier = Modifier.size(24.dp)) {
-                        Icon(
-                            Icons.Default.MoreHoriz,
-                            contentDescription = "More",
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
+                    PureOverflowButton(
+                        expanded = showMenu,
+                        onClick = { showMenu = true },
+                        contentDescription = "Post options",
+                        icon = Icons.Default.MoreHoriz
+                    )
 
-                    DropdownMenu(
+                    PureDropdownMenu(
                         expanded = showMenu,
                         onDismissRequest = { showMenu = false }
                     ) {
-                        DropdownMenuItem(
+                        PureDropdownMenuItem(
                             text = { Text("Report") },
                             onClick = {
                                 showMenu = false
@@ -146,7 +157,7 @@ fun PureAnnouncementCard(
                         )
                         
                         if (announcement.authorUid == currentUid) {
-                            DropdownMenuItem(
+                            PureDropdownMenuItem(
                                 text = { Text("Delete", color = MaterialTheme.colorScheme.error) },
                                 onClick = {
                                     showMenu = false
@@ -395,8 +406,9 @@ fun PureAnnouncementCard(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                EngagementAction(if (isLikedByCurrentUser) Icons.Default.Favorite else Icons.Outlined.FavoriteBorder, "$likeCount", if (isLikedByCurrentUser) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant) { onLike?.invoke() }
-                EngagementAction(Icons.Outlined.ChatBubbleOutline, "$commentCount") { onComment?.invoke() ?: onClick?.invoke() }
+                EngagementAction(if (isLikedByCurrentUser) Icons.Default.Favorite else Icons.Outlined.FavoriteBorder, "$likeCount", if (isLikedByCurrentUser) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
+                    description = "${if (isLikedByCurrentUser) "Unlike" else "Like"} post, $likeCount likes") { onLike?.invoke() }
+                EngagementAction(Icons.Outlined.ChatBubbleOutline, "$commentCount", description = "Comments, $commentCount") { onComment?.invoke() ?: onClick?.invoke() }
                 EngagementAction(Icons.Outlined.IosShare, "Share") { onShare() }
                 EngagementAction(if (isSaved) Icons.Default.Bookmark else Icons.Outlined.BookmarkBorder, if (isSaved) "Saved" else "Save", MaterialTheme.colorScheme.onSurfaceVariant) { onSave?.invoke() }
             }
@@ -438,11 +450,26 @@ fun PureAnnouncementCard(
 }
 
 @Composable
-private fun EngagementAction(icon: androidx.compose.ui.graphics.vector.ImageVector, label: String, tint: androidx.compose.ui.graphics.Color = MaterialTheme.colorScheme.onSurfaceVariant, onClick: () -> Unit) {
-    TextButton(onClick = onClick, contentPadding = PaddingValues(horizontal = 6.dp, vertical = 2.dp)) {
-        Icon(icon, null, modifier = Modifier.size(18.dp), tint = tint)
+private fun EngagementAction(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    label: String,
+    tint: Color = MaterialTheme.colorScheme.onSurfaceVariant,
+    description: String = label,
+    onClick: () -> Unit
+) {
+    val interactionSource = remember { MutableInteractionSource() }
+    val pressed by interactionSource.collectIsPressedAsState()
+    val scale by animateFloatAsState(if (pressed) 0.9f else 1f, tween(120), label = "Post action press")
+    val animatedTint by animateColorAsState(tint, tween(180), label = "Post action color")
+    TextButton(
+        onClick = onClick,
+        interactionSource = interactionSource,
+        modifier = Modifier.heightIn(min = 48.dp).semantics { contentDescription = description },
+        contentPadding = PaddingValues(horizontal = 6.dp, vertical = 2.dp)
+    ) {
+        Icon(icon, null, modifier = Modifier.size(20.dp).graphicsLayer { scaleX = scale; scaleY = scale }, tint = animatedTint)
         Spacer(Modifier.width(4.dp))
-        Text(label, style = MaterialTheme.typography.labelMedium, color = tint)
+        Text(label, style = MaterialTheme.typography.labelMedium, color = animatedTint)
     }
 }
 
@@ -996,18 +1023,26 @@ fun PureReportDialog(
     val reasons = listOf("Spam", "Inappropriate Content", "Fake", "Other")
     var selectedReason by remember { mutableStateOf(reasons.first()) }
 
-    AlertDialog(
+    PureAlertDialog(
         onDismissRequest = onDismiss,
+        icon = { Icon(Icons.Default.Flag, contentDescription = null) },
         title = { Text("Report Post") },
         text = {
             Column {
                 Text("Why are you reporting this post?")
                 Spacer(modifier = Modifier.height(8.dp))
                 reasons.forEach { r ->
+                    val selectionColor by animateColorAsState(
+                        if (r == selectedReason) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.45f)
+                        else Color.Transparent,
+                        tween(140), label = "Report reason selection"
+                    )
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
                         modifier = Modifier
                             .fillMaxWidth()
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(selectionColor)
                             .clickable { selectedReason = r }
                             .padding(vertical = 4.dp)
                     ) {
@@ -1052,6 +1087,7 @@ fun PureReportDialog(
     )
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun PureSharePostDialog(
     link: String,
@@ -1060,8 +1096,9 @@ fun PureSharePostDialog(
     onShareViaApp: () -> Unit,
     onShareToFriend: (() -> Unit)? = null
 ) {
-    AlertDialog(
+    PureAlertDialog(
         onDismissRequest = onDismiss,
+        icon = { Icon(Icons.Outlined.IosShare, contentDescription = null) },
         title = { Text("Share Post") },
         text = {
             Column {
@@ -1081,7 +1118,7 @@ fun PureSharePostDialog(
             }
         },
         confirmButton = {
-            Row {
+            FlowRow(horizontalArrangement = Arrangement.End) {
                 if (onShareToFriend != null) {
                     TextButton(onClick = onShareToFriend) {
                         Text("Send to friend")

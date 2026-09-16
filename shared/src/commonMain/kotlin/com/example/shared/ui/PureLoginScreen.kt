@@ -159,7 +159,7 @@ fun PureForgotPasswordDialog(
     onSendClick: () -> Unit,
     onDismiss: () -> Unit
 ) {
-    AlertDialog(
+    PureAlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("Reset Password") },
         text = {

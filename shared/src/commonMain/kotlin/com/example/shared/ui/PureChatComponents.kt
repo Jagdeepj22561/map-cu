@@ -34,7 +34,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.BottomSheetDefaults
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
@@ -61,7 +60,7 @@ fun PureDeleteChatDialog(
     onDismiss: () -> Unit,
     onConfirm: () -> Unit
 ) {
-    AlertDialog(
+    PureAlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("Delete chat") },
         text = { Text("Are you sure you want to delete the chat with $chatName?") },
@@ -278,7 +277,7 @@ fun PureStudentProfileDialog(
         uCol.isNotBlank() && mCol.isNotBlank() && (uCol == mCol || uCol.contains(mCol) || mCol.contains(uCol))
     }
 
-    AlertDialog(
+    PureAlertDialog(
         onDismissRequest = onDismiss,
         confirmButton = {
             if (isAlreadyFriend) {

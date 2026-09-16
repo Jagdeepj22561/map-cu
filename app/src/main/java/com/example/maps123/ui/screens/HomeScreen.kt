@@ -1,5 +1,7 @@
 package com.example.maps123.ui.screens
 
+import com.example.shared.ui.PureAlertDialog as AlertDialog
+
 import com.example.maps123.MainActivity
 import android.Manifest
 import android.content.pm.PackageManager

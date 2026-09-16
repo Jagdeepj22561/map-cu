@@ -1,5 +1,12 @@
 package com.example.shared.ui
 
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.expandHorizontally
+import androidx.compose.animation.shrinkHorizontally
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -8,9 +15,15 @@ import androidx.compose.material.icons.automirrored.filled.Chat
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.selected
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 
@@ -115,31 +128,38 @@ fun PureHomeScreen(
 @Composable
 fun PureDockItem(label: String, icon: ImageVector, selected: Boolean, badgeCount: Int = 0, onClick: () -> Unit) {
     val shape = RoundedCornerShape(22.dp)
-    if (selected) {
-        Surface(
-            onClick = onClick,
-            shape = shape,
-            color = MaterialTheme.colorScheme.primary,
-            modifier = Modifier.height(44.dp)
-        ) {
-            Row(
-                Modifier.padding(horizontal = 16.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(7.dp)
-            ) {
-                BadgedBox(badge = { if (badgeCount > 0) Badge { Text(if (badgeCount > 99) "99+" else "$badgeCount") } }) {
-                    Icon(icon, label, tint = MaterialTheme.colorScheme.onPrimary, modifier = Modifier.size(20.dp))
-                }
-                Text(label, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onPrimary, fontWeight = FontWeight.SemiBold)
-            }
+    val background by animateColorAsState(
+        if (selected) MaterialTheme.colorScheme.primary else Color.Transparent,
+        tween(180), label = "Dock selection"
+    )
+    val foreground by animateColorAsState(
+        if (selected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
+        tween(180), label = "Dock content"
+    )
+    Surface(
+        onClick = onClick,
+        shape = shape,
+        color = background,
+        modifier = Modifier.height(48.dp).semantics {
+            this.selected = selected
+            role = Role.Tab
         }
-    } else {
-        IconButton(
-            onClick = onClick,
-            modifier = Modifier.size(44.dp)
+    ) {
+        Row(
+            Modifier.padding(horizontal = 13.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.Center
         ) {
             BadgedBox(badge = { if (badgeCount > 0) Badge { Text(if (badgeCount > 99) "99+" else "$badgeCount") } }) {
-                Icon(icon, label, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(22.dp))
+                Icon(icon, label, tint = foreground, modifier = Modifier.size(22.dp))
+            }
+            AnimatedVisibility(
+                visible = selected,
+                enter = expandHorizontally(tween(180)) + fadeIn(tween(140)),
+                exit = shrinkHorizontally(tween(180)) + fadeOut(tween(100))
+            ) {
+                Text(label, modifier = Modifier.padding(start = 7.dp), style = MaterialTheme.typography.labelMedium,
+                    color = foreground, fontWeight = FontWeight.SemiBold, maxLines = 1)
             }
         }
     }

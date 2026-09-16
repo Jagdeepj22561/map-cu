@@ -591,7 +591,7 @@ fun PureEventDetailScreen(
             )
         }
 
-        AlertDialog(
+        PureAlertDialog(
             onDismissRequest = { showAddMilestoneDialog = false },
             title = { Text("Add Event Milestone / Round") },
             text = {
@@ -661,7 +661,7 @@ fun PureEventDetailScreen(
         var teamName by remember { mutableStateOf("${announcement.title} Team") }
         var busy by remember { mutableStateOf(false) }
 
-        AlertDialog(
+        PureAlertDialog(
             onDismissRequest = { if (!busy) showCreateTeamDialog = false },
             title = { Text("Create Event Team") },
             text = {
@@ -709,7 +709,7 @@ fun PureEventDetailScreen(
     // Dialog: Rename Team
     if (showRenameTeamDialog && myTeam != null) {
         var renameText by remember { mutableStateOf(myTeam!!.name) }
-        AlertDialog(
+        PureAlertDialog(
             onDismissRequest = { showRenameTeamDialog = false },
             title = { Text("Rename Team") },
             text = {
@@ -746,7 +746,7 @@ fun PureEventDetailScreen(
         var joinMessage by remember { mutableStateOf("") }
         var isSubmitting by remember { mutableStateOf(false) }
 
-        AlertDialog(
+        PureAlertDialog(
             onDismissRequest = { if (!isSubmitting) teamToRequestJoin = null },
             title = { Text("Request to Join ${teamToRequestJoin!!.name}") },
             text = {
@@ -791,7 +791,7 @@ fun PureEventDetailScreen(
 
     // Dialog: Invite Friends
     if (showInviteFriendsDialog && myTeam != null) {
-        AlertDialog(
+        PureAlertDialog(
             onDismissRequest = { showInviteFriendsDialog = false },
             title = { Text("Invite Friends to Team") },
             text = {
@@ -856,7 +856,7 @@ fun PureEventDetailScreen(
         var reqNeeded by remember { mutableIntStateOf(1) }
         var isPosting by remember { mutableStateOf(false) }
 
-        AlertDialog(
+        PureAlertDialog(
             onDismissRequest = { if (!isPosting) showPostRequirementDialog = false },
             title = { Text("Post Teammate Requirement") },
             text = {
@@ -906,7 +906,7 @@ fun PureEventDetailScreen(
 
     // Snackbar / status dialog if error occurs
     if (teamStatusMessage != null) {
-        AlertDialog(
+        PureAlertDialog(
             onDismissRequest = { teamStatusMessage = null },
             title = { Text("Notice") },
             text = { Text(teamStatusMessage!!) },

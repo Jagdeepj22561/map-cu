@@ -82,7 +82,7 @@ fun TeamEventSection(announcement: Announcement) {
 
     if (showCreateDialog) {
         var name by remember { mutableStateOf("${announcement.title} Team") }
-        AlertDialog(
+        PureAlertDialog(
             onDismissRequest = { if (!createBusy) showCreateDialog = false },
             title = { Text("Create your team") },
             text = {
@@ -129,7 +129,7 @@ fun TeamEventSection(announcement: Announcement) {
     }
 
     if (renameDialogOpen && myTeam != null) {
-        AlertDialog(
+        PureAlertDialog(
             onDismissRequest = { renameDialogOpen = false },
             title = { Text("Rename team") },
             text = {
@@ -386,7 +386,7 @@ fun TeamEventSection(announcement: Announcement) {
     }
 
     if (showFind) {
-        AlertDialog(
+        PureAlertDialog(
             onDismissRequest = { showFind = false },
             title = { Text("Find Team Members") },
             text = {
@@ -491,7 +491,7 @@ fun TeamEventSection(announcement: Announcement) {
     }
 
     if (showPost) {
-        AlertDialog(
+        PureAlertDialog(
             onDismissRequest = { if (!postBusy) showPost = false },
             title = { Text("Team Requirement") },
             text = {

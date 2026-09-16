@@ -585,7 +585,7 @@ fun PureGroupsScreen(
 
     // Create Community Dialog
     if (showCreate) {
-        AlertDialog(
+        PureAlertDialog(
             onDismissRequest = { if (!saving) showCreate = false },
             title = { Text("Create Community") },
             text = {
@@ -681,7 +681,7 @@ fun PureGroupsScreen(
 
     // Join with Code / Link Dialog
     if (showJoinByCodeDialog) {
-        AlertDialog(
+        PureAlertDialog(
             onDismissRequest = { if (!joinLoading) showJoinByCodeDialog = false },
             title = {
                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -1173,85 +1173,89 @@ private fun CommunityChatDialog(
                             IconButton(onClick = { showInviteDialog = true }) {
                                 Icon(Icons.Default.Share, "Invite")
                             }
-                            IconButton(onClick = { showMenu = true }) {
-                                Icon(Icons.Default.MoreVert, "More options")
-                            }
-                            DropdownMenu(
-                                expanded = showMenu,
-                                onDismissRequest = { showMenu = false }
-                            ) {
-                                DropdownMenuItem(
-                                    text = { Text("Community Info") },
-                                    leadingIcon = { Icon(Icons.Default.Info, null) },
-                                    onClick = {
-                                        showMenu = false
-                                        showInfo = true
-                                    }
+                            Box {
+                                PureOverflowButton(
+                                    expanded = showMenu,
+                                    onClick = { showMenu = true },
+                                    contentDescription = "Community options"
                                 )
-                                DropdownMenuItem(
-                                    text = { Text("Members (${members.size})") },
-                                    leadingIcon = { Icon(Icons.Default.Groups, null) },
-                                    onClick = {
-                                        showMenu = false
-                                        showMembers = true
-                                    }
-                                )
-                                if (isAdmin) {
-                                    DropdownMenuItem(
-                                        text = { Text("Add Member") },
-                                        leadingIcon = { Icon(Icons.Default.PersonAdd, null) },
+                                PureDropdownMenu(
+                                    expanded = showMenu,
+                                    onDismissRequest = { showMenu = false }
+                                ) {
+                                    PureDropdownMenuItem(
+                                        text = { Text("Community Info") },
+                                        leadingIcon = { Icon(Icons.Default.Info, null) },
                                         onClick = {
                                             showMenu = false
-                                            showAddMemberSheet = true
+                                            showInfo = true
                                         }
                                     )
-                                }
-                                DropdownMenuItem(
-                                    text = { Text("Invite via Link / Code") },
-                                    leadingIcon = { Icon(Icons.Default.Link, null) },
-                                    onClick = {
-                                        showMenu = false
-                                        showInviteDialog = true
-                                    }
-                                )
-                                DropdownMenuItem(
-                                    text = { Text("Search Messages") },
-                                    leadingIcon = { Icon(Icons.Default.Search, null) },
-                                    onClick = {
-                                        showMenu = false
-                                        searchMode = true
-                                    }
-                                )
-                                DropdownMenuItem(
-                                    text = { Text("Refresh") },
-                                    leadingIcon = { Icon(Icons.Default.Refresh, null) },
-                                    onClick = {
-                                        showMenu = false
-                                        scope.launch {
-                                            loadMessages()
-                                            loadMembers()
-                                        }
-                                    }
-                                )
-                                HorizontalDivider()
-                                if (isOwner) {
-                                    DropdownMenuItem(
-                                        text = { Text("Delete Community", color = MaterialTheme.colorScheme.error) },
-                                        leadingIcon = { Icon(Icons.Default.Delete, null, tint = MaterialTheme.colorScheme.error) },
+                                    PureDropdownMenuItem(
+                                        text = { Text("Members (${members.size})") },
+                                        leadingIcon = { Icon(Icons.Default.Groups, null) },
                                         onClick = {
                                             showMenu = false
-                                            showDeleteCommunityConfirm = true
+                                            showMembers = true
                                         }
                                     )
-                                } else {
-                                    DropdownMenuItem(
-                                        text = { Text("Leave Community", color = MaterialTheme.colorScheme.error) },
-                                        leadingIcon = { Icon(Icons.Default.ExitToApp, null, tint = MaterialTheme.colorScheme.error) },
+                                    if (isAdmin) {
+                                        PureDropdownMenuItem(
+                                            text = { Text("Add Member") },
+                                            leadingIcon = { Icon(Icons.Default.PersonAdd, null) },
+                                            onClick = {
+                                                showMenu = false
+                                                showAddMemberSheet = true
+                                            }
+                                        )
+                                    }
+                                    PureDropdownMenuItem(
+                                        text = { Text("Invite via Link / Code") },
+                                        leadingIcon = { Icon(Icons.Default.Link, null) },
                                         onClick = {
                                             showMenu = false
-                                            showLeaveConfirm = true
+                                            showInviteDialog = true
                                         }
                                     )
+                                    PureDropdownMenuItem(
+                                        text = { Text("Search Messages") },
+                                        leadingIcon = { Icon(Icons.Default.Search, null) },
+                                        onClick = {
+                                            showMenu = false
+                                            searchMode = true
+                                        }
+                                    )
+                                    PureDropdownMenuItem(
+                                        text = { Text("Refresh") },
+                                        leadingIcon = { Icon(Icons.Default.Refresh, null) },
+                                        onClick = {
+                                            showMenu = false
+                                            scope.launch {
+                                                loadMessages()
+                                                loadMembers()
+                                            }
+                                        }
+                                    )
+                                    HorizontalDivider()
+                                    if (isOwner) {
+                                        PureDropdownMenuItem(
+                                            text = { Text("Delete Community", color = MaterialTheme.colorScheme.error) },
+                                            leadingIcon = { Icon(Icons.Default.Delete, null, tint = MaterialTheme.colorScheme.error) },
+                                            onClick = {
+                                                showMenu = false
+                                                showDeleteCommunityConfirm = true
+                                            }
+                                        )
+                                    } else {
+                                        PureDropdownMenuItem(
+                                            text = { Text("Leave Community", color = MaterialTheme.colorScheme.error) },
+                                            leadingIcon = { Icon(Icons.Default.ExitToApp, null, tint = MaterialTheme.colorScheme.error) },
+                                            onClick = {
+                                                showMenu = false
+                                                showLeaveConfirm = true
+                                            }
+                                        )
+                                    }
                                 }
                             }
                         }
@@ -1659,16 +1663,18 @@ private fun CommunityChatDialog(
 
                                 // Actions menu
                                 Box {
-                                    IconButton(onClick = { memberMenuExpanded = true }) {
-                                        Icon(Icons.Default.MoreVert, "Member Actions", modifier = Modifier.size(18.dp))
-                                    }
+                                    PureOverflowButton(
+                                        expanded = memberMenuExpanded,
+                                        onClick = { memberMenuExpanded = true },
+                                        contentDescription = "Member actions"
+                                    )
 
-                                    DropdownMenu(
+                                    PureDropdownMenu(
                                         expanded = memberMenuExpanded,
                                         onDismissRequest = { memberMenuExpanded = false }
                                     ) {
                                         if (!isSelf) {
-                                            DropdownMenuItem(
+                                            PureDropdownMenuItem(
                                                 text = { Text("Message Privately") },
                                                 leadingIcon = { Icon(Icons.AutoMirrored.Filled.Send, null) },
                                                 onClick = {
@@ -1682,7 +1688,7 @@ private fun CommunityChatDialog(
                                         // Owner actions
                                         if (isOwner && !isSelf) {
                                             if (member.role == "admin") {
-                                                DropdownMenuItem(
+                                                PureDropdownMenuItem(
                                                     text = { Text("Dismiss as Admin") },
                                                     leadingIcon = { Icon(Icons.Default.Shield, null) },
                                                     onClick = {
@@ -1691,7 +1697,7 @@ private fun CommunityChatDialog(
                                                     }
                                                 )
                                             } else {
-                                                DropdownMenuItem(
+                                                PureDropdownMenuItem(
                                                     text = { Text("Promote to Admin") },
                                                     leadingIcon = { Icon(Icons.Default.Shield, null) },
                                                     onClick = {
@@ -1702,7 +1708,7 @@ private fun CommunityChatDialog(
                                             }
 
                                             HorizontalDivider()
-                                            DropdownMenuItem(
+                                            PureDropdownMenuItem(
                                                 text = { Text("Remove from Community", color = MaterialTheme.colorScheme.error) },
                                                 leadingIcon = { Icon(Icons.Default.PersonRemove, null, tint = MaterialTheme.colorScheme.error) },
                                                 onClick = {
@@ -1713,7 +1719,7 @@ private fun CommunityChatDialog(
                                         } else if (isAdmin && !targetIsAdmin && !isSelf) {
                                             // Admin can remove regular members
                                             HorizontalDivider()
-                                            DropdownMenuItem(
+                                            PureDropdownMenuItem(
                                                 text = { Text("Remove from Community", color = MaterialTheme.colorScheme.error) },
                                                 leadingIcon = { Icon(Icons.Default.PersonRemove, null, tint = MaterialTheme.colorScheme.error) },
                                                 onClick = {
@@ -1892,7 +1898,7 @@ private fun CommunityChatDialog(
     // Community Info Dialog
     if (showInfo) {
         val adminMembers = members.filter { it.role == "admin" || it.role == "owner" || it.userId == community.ownerId }
-        AlertDialog(
+        PureAlertDialog(
             onDismissRequest = { showInfo = false },
             title = {
                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -1957,7 +1963,7 @@ private fun CommunityChatDialog(
 
     // Confirm Remove Member Dialog
     memberToRemove?.let { target ->
-        AlertDialog(
+        PureAlertDialog(
             onDismissRequest = { memberToRemove = null },
             title = { Text("Remove Member") },
             text = { Text("Are you sure you want to remove \"${target.name}\" from ${community.name}? They will lose access to messages.") },
@@ -1978,7 +1984,7 @@ private fun CommunityChatDialog(
 
     // Confirm Leave Community Dialog
     if (showLeaveConfirm) {
-        AlertDialog(
+        PureAlertDialog(
             onDismissRequest = { showLeaveConfirm = false },
             title = { Text("Leave Community") },
             text = { Text("Are you sure you want to leave \"${community.name}\"? You will need to rejoin to view and post messages.") },
@@ -1998,7 +2004,7 @@ private fun CommunityChatDialog(
 
     // Confirm Delete Community Dialog (Owner)
     if (showDeleteCommunityConfirm) {
-        AlertDialog(
+        PureAlertDialog(
             onDismissRequest = { if (!isDeletingCommunity) showDeleteCommunityConfirm = false },
             title = { Text("Delete Community") },
             text = { Text("Are you sure you want to delete \"${community.name}\"? This action is permanent and will remove all members and messages.") },
@@ -2108,7 +2114,7 @@ private fun CommunityChatDialog(
     }
 
     showDeleteConfirm?.let { message ->
-        AlertDialog(
+        PureAlertDialog(
             onDismissRequest = { showDeleteConfirm = null },
             title = { Text("Delete message") },
             text = { Text("This will permanently remove this message.") },

@@ -1,5 +1,7 @@
 package com.example.maps123.ui.screens
 
+import com.example.shared.ui.PureAlertDialog as AlertDialog
+
 import android.widget.Toast
 import androidx.compose.material3.*
 import androidx.compose.runtime.*

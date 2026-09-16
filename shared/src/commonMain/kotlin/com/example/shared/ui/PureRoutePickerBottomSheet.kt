@@ -1,6 +1,8 @@
 package com.example.shared.ui
 
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
@@ -9,10 +11,12 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.SwapVert
+import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import com.example.shared.Route
@@ -147,6 +151,9 @@ fun PureDropdownMenuBox(
 ) {
     var expanded by remember { mutableStateOf(false) }
     var query by remember { mutableStateOf("") }
+    val arrowRotation by animateFloatAsState(
+        if (expanded) 180f else 0f, tween(180), label = "Location menu expansion"
+    )
 
     val filtered = remember(options, query) {
         if (query.isBlank()) options
@@ -156,12 +163,16 @@ fun PureDropdownMenuBox(
     Box {
         OutlinedButton(
             onClick = { expanded = true }, 
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
             shape = RoundedCornerShape(12.dp)
         ) {
-            Text(selected ?: placeholder, maxLines = 1)
+            Text(selected ?: placeholder, maxLines = 1, modifier = Modifier.weight(1f),
+                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
+            Spacer(Modifier.width(8.dp))
+            Icon(Icons.Default.KeyboardArrowDown, contentDescription = null,
+                modifier = Modifier.size(20.dp).rotate(arrowRotation))
         }
-        DropdownMenu(
+        PureDropdownMenu(
             expanded = expanded, 
             onDismissRequest = { expanded = false },
             modifier = Modifier.fillMaxWidth(0.8f)
@@ -197,7 +208,7 @@ fun PureDropdownMenuBox(
 
             @Composable
             fun ItemRow(label: String, iconEmoji: String) {
-                DropdownMenuItem(
+                PureDropdownMenuItem(
                     text = { Text(label) },
                     leadingIcon = { Text(iconEmoji) },
                     onClick = {
@@ -209,7 +220,7 @@ fun PureDropdownMenuBox(
             }
 
             if (currentItems.isNotEmpty()) {
-                DropdownMenuItem(
+                PureDropdownMenuItem(
                     text = { Text("📍 Current") },
                     enabled = false,
                     onClick = {}
@@ -221,7 +232,7 @@ fun PureDropdownMenuBox(
             }
 
             if (gateItems.isNotEmpty()) {
-                DropdownMenuItem(
+                PureDropdownMenuItem(
                     text = { Text("🏛 Gates") },
                     enabled = false,
                     onClick = {}
@@ -233,7 +244,7 @@ fun PureDropdownMenuBox(
             }
 
             if (blockItems.isNotEmpty()) {
-                DropdownMenuItem(
+                PureDropdownMenuItem(
                     text = { Text("🏢 Academic Blocks") },
                     enabled = false,
                     onClick = {}
@@ -245,7 +256,7 @@ fun PureDropdownMenuBox(
             }
 
             if (facilityItems.isNotEmpty()) {
-                DropdownMenuItem(
+                PureDropdownMenuItem(
                     text = { Text("🏫 Facilities") },
                     enabled = false,
                     onClick = {}

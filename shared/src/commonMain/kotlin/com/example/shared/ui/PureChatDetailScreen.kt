@@ -208,14 +208,16 @@ fun PureChatDetailScreen(
                         }
                     } else {
                         Box {
-                            IconButton(onClick = { showMenu = true }) {
-                                Icon(Icons.Default.MoreVert, null)
-                            }
-                            DropdownMenu(
+                            PureOverflowButton(
+                                expanded = showMenu,
+                                onClick = { showMenu = true },
+                                contentDescription = "Chat options"
+                            )
+                            PureDropdownMenu(
                                 expanded = showMenu,
                                 onDismissRequest = { showMenu = false }
                             ) {
-                                DropdownMenuItem(
+                                PureDropdownMenuItem(
                                     text = { Text("Search") },
                                     leadingIcon = { Icon(Icons.Default.Search, null) },
                                     onClick = {
@@ -223,7 +225,7 @@ fun PureChatDetailScreen(
                                         onToggleSearch(true)
                                     }
                                 )
-                                DropdownMenuItem(
+                                PureDropdownMenuItem(
                                     text = { Text("View Profile") },
                                     leadingIcon = { Icon(Icons.Default.Person, null) },
                                     onClick = {
@@ -231,7 +233,7 @@ fun PureChatDetailScreen(
                                         onProfileClick()
                                     }
                                 )
-                                DropdownMenuItem(
+                                PureDropdownMenuItem(
                                     text = { Text(if (isBlocked) "Unblock User" else "Block User") },
                                     leadingIcon = { Icon(Icons.Default.Block, null) },
                                     onClick = {
@@ -239,23 +241,23 @@ fun PureChatDetailScreen(
                                         onBlockUser()
                                     }
                                 )
-                                DropdownMenuItem(
-                                    text = { Text("Clear Chat") },
-                                    leadingIcon = { Icon(Icons.Default.DeleteSweep, null) },
+                                PureDropdownMenuItem(
+                                    text = { Text("Clear Chat", color = MaterialTheme.colorScheme.error) },
+                                    leadingIcon = { Icon(Icons.Default.DeleteSweep, null, tint = MaterialTheme.colorScheme.error) },
                                     onClick = {
                                         showMenu = false
                                         onClearChat()
                                     }
                                 )
-                                DropdownMenuItem(
-                                    text = { Text("Delete Chat") },
-                                    leadingIcon = { Icon(Icons.Default.Delete, null) },
+                                PureDropdownMenuItem(
+                                    text = { Text("Delete Chat", color = MaterialTheme.colorScheme.error) },
+                                    leadingIcon = { Icon(Icons.Default.Delete, null, tint = MaterialTheme.colorScheme.error) },
                                     onClick = {
                                         showMenu = false
                                         onDeleteChat()
                                     }
                                 )
-                                DropdownMenuItem(
+                                PureDropdownMenuItem(
                                     text = { Text("Report User") },
                                     leadingIcon = { Icon(Icons.Default.Report, null) },
                                     onClick = {
@@ -426,7 +428,7 @@ fun PureChatDetailScreen(
     }
 
     if (showDeleteDialog) {
-        AlertDialog(
+        PureAlertDialog(
             onDismissRequest = { showDeleteDialog = false },
             confirmButton = {
                 TextButton(
