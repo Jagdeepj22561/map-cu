@@ -608,6 +608,7 @@ fun HomeScreen(
                                             repository = announcementRepository,
                                             chatRepository = chatRepository,
                                             searchQuery = searchQuery,
+                                            onSearchQueryChange = { searchQuery = it },
                                             selectedTab = announcementTab,
                                             onTabSelected = { announcementTab = it },
                                             onSettingsClick = { currentScreen = PureAppScreen.SETTINGS },

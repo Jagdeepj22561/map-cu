@@ -12,6 +12,7 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Campaign
 import androidx.compose.material.icons.filled.Event
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.VolunteerActivism
 import androidx.compose.material3.*
 import androidx.compose.material3.TabRowDefaults.tabIndicatorOffset
@@ -51,6 +52,8 @@ fun PureAnnouncementsScreen(
     formatTime: (Long) -> String,
     renderImage: @Composable (String?, Modifier, ContentScale) -> Unit,
     currentUid: String?
+    , searchQuery: String = ""
+    , onSearchQueryChange: (String) -> Unit = {}
 ) {
     val currentType = AnnouncementType.values().getOrElse(selectedTab) { AnnouncementType.NEWS }
 
@@ -95,17 +98,22 @@ fun PureAnnouncementsScreen(
         ) {
             Surface(color = MaterialTheme.colorScheme.surface) {
                 Column(Modifier.padding(horizontal = 16.dp, vertical = 10.dp)) {
-                    Surface(
-                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.7f),
+                    OutlinedTextField(
+                        value = searchQuery,
+                        onValueChange = onSearchQueryChange,
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true,
                         shape = RoundedCornerShape(14.dp),
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Row(Modifier.padding(horizontal = 14.dp, vertical = 11.dp), verticalAlignment = Alignment.CenterVertically) {
-                            Icon(Icons.Default.Search, null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(18.dp))
-                            Spacer(Modifier.width(8.dp))
-                            Text("What's on your mind or searching for?", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        placeholder = { Text("Search news, events, lost & found…") },
+                        leadingIcon = { Icon(Icons.Default.Search, contentDescription = "Search") },
+                        trailingIcon = {
+                            if (searchQuery.isNotEmpty()) {
+                                IconButton(onClick = { onSearchQueryChange("") }) {
+                                    Icon(Icons.Default.Close, contentDescription = "Clear search")
+                                }
+                            }
                         }
-                    }
+                    )
                 }
             }
             ScrollableTabRow(

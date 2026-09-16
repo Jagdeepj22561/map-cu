@@ -69,6 +69,7 @@ fun AnnouncementsScreen(
     repository: AnnouncementRepository,
     chatRepository: ChatRepository,
     searchQuery: String = "",
+    onSearchQueryChange: (String) -> Unit = {},
     selectedTab: Int,
     onTabSelected: (Int) -> Unit,
     onSettingsClick: () -> Unit,
@@ -225,7 +226,9 @@ fun AnnouncementsScreen(
         renderImage = { url, modifier, scale ->
             AppAsyncImage(model = url, contentDescription = null, modifier = modifier, contentScale = scale)
         },
-        currentUid = currentUid
+        currentUid = currentUid,
+        searchQuery = searchQuery,
+        onSearchQueryChange = onSearchQueryChange
         , isLikedByCurrentUser = { post -> localLikes[post.id] ?: post.likes.containsKey(currentUid) }
         , isSaved = { post -> post.id in savedIds }
         , likeCount = { post -> post.likes.size }
