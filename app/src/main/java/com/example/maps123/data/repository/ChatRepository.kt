@@ -21,6 +21,8 @@ import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import java.util.UUID
 
+data class ChatRequestState(val status: String, val incoming: Boolean)
+
 /** Supabase stores chat metadata; the custom server transports messages and Room stores history. */
 class ChatRepository(private val context: Context) : IChatRepository {
     private val customChat = CustomChatClient(context.applicationContext)
@@ -456,6 +458,32 @@ class ChatRepository(private val context: Context) : IChatRepository {
             .toSet()
     }
 
+    /** Returns the request visible from this conversation, if any. */
+    suspend fun getChatRequestState(otherUid: String): ChatRequestState? {
+        val mine = uid()
+        val rows = SupabaseProvider.client
+            .from("friend_requests")
+            .select {
+                filter {
+                    or {
+                        and { eq("sender_id", mine); eq("receiver_id", otherUid) }
+                        and { eq("sender_id", otherUid); eq("receiver_id", mine) }
+                    }
+                }
+                limit(2)
+            }
+            .decodeList<FriendRequestRow>()
+
+        val incoming = rows.firstOrNull { it.senderId == otherUid && it.receiverId == mine }
+        if (incoming?.status == "pending") return ChatRequestState("pending", incoming = true)
+
+        val outgoing = rows.firstOrNull { it.senderId == mine && it.receiverId == otherUid }
+        if (outgoing != null && outgoing.status in setOf("pending", "rejected")) {
+            return ChatRequestState(outgoing.status, incoming = false)
+        }
+        return null
+    }
+
     fun clearAllListeners() {
         customChat.stop()
         customChat.activeChatId = null
@@ -585,6 +613,7 @@ private data class FriendRequestRow(
     val id: String,
     @SerialName("sender_id") val senderId: String,
     @SerialName("receiver_id") val receiverId: String,
+    val status: String = "pending",
     @SerialName("created_at") val createdAt: String
 ) {
     fun time() = java.time.OffsetDateTime.parse(createdAt).toInstant().toEpochMilli()

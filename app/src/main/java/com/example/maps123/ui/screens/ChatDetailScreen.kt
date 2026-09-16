@@ -19,13 +19,25 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.material3.Text
+import androidx.compose.material3.Button
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.Card
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.width
+import androidx.compose.ui.unit.dp
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import com.example.maps123.ui.components.AppAsyncImage
 import com.example.maps123.data.repository.ChatRepository
+import com.example.maps123.data.repository.ChatRequestState
 import com.example.maps123.data.repository.AuthRepository
 import kotlinx.coroutines.launch
 import com.example.maps123.utils.DateUtils
@@ -73,6 +85,10 @@ fun ChatDetailScreen(
     var pendingImageCaption by remember { mutableStateOf("") }
     var pendingImageUrl by remember { mutableStateOf<String?>(null) }
     var isUploadingImage by remember { mutableStateOf(false) }
+    var requestState by remember { mutableStateOf<ChatRequestState?>(null) }
+    var requestActionBusy by remember { mutableStateOf(false) }
+    var isFriendUser by remember { mutableStateOf(false) }
+    var requestStateLoading by remember { mutableStateOf(true) }
 
     val clipboardManager = LocalClipboardManager.current
     val picker = rememberLauncherForActivityResult(
@@ -87,8 +103,26 @@ fun ChatDetailScreen(
         runCatching {
             repo.setActiveChat(chatId)
             repo.fetchNewMessages()
+            isFriendUser = repo.isFriend(targetUid)
+            requestState = repo.getChatRequestState(targetUid)
         }.onFailure {
             Toast.makeText(context, it.message ?: "Failed to load chat", Toast.LENGTH_SHORT).show()
+        }
+        requestStateLoading = false
+    }
+
+    // Keep the banner synchronized while the chat is open. Acceptance or
+    // decline happens on the other device, so waiting for the 30-second global
+    // friend sync would leave the composer in the wrong state.
+    LaunchedEffect(chatId, targetUid) {
+        while (true) {
+            runCatching {
+                val friend = repo.isFriend(targetUid)
+                val state = repo.getChatRequestState(targetUid)
+                isFriendUser = friend
+                requestState = if (friend) null else state
+            }
+            kotlinx.coroutines.delay(10_000)
         }
     }
 
@@ -123,6 +157,7 @@ fun ChatDetailScreen(
                         friendUid = targetUid,
                         imageUrl = null
                     )
+                    if (!isFriendUser) requestState = ChatRequestState("pending", incoming = false)
                 } catch (e: Exception) {
                     Toast.makeText(context, e.message, Toast.LENGTH_SHORT).show()
                 }
@@ -199,6 +234,79 @@ fun ChatDetailScreen(
         renderImage = { url, modifier, scale ->
             AppAsyncImage(model = url, contentDescription = null, modifier = modifier, contentScale = scale)
         },
+        requestBanner = {
+            requestState?.let { state ->
+                when {
+                    state.incoming && state.status == "pending" -> Card(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 12.dp, vertical = 8.dp)
+                    ) {
+                        Column(Modifier.padding(14.dp)) {
+                            Text("Message request", style = MaterialTheme.typography.titleSmall)
+                            Text(
+                                "This person wants to start a conversation. Accept to reply, or decline the request.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.padding(top = 3.dp)
+                            )
+                            Row(Modifier.padding(top = 8.dp)) {
+                                Button(
+                                    enabled = !requestActionBusy,
+                                    onClick = {
+                                        requestActionBusy = true
+                                        scope.launch {
+                                            runCatching { repo.acceptFriendRequest(targetUid) }
+                                                .onSuccess { isFriendUser = true; requestState = null; Toast.makeText(context, "Request accepted", Toast.LENGTH_SHORT).show() }
+                                                .onFailure { Toast.makeText(context, it.message ?: "Unable to accept request", Toast.LENGTH_SHORT).show() }
+                                            requestActionBusy = false
+                                        }
+                                    }
+                                ) { Text("Accept") }
+                                Spacer(Modifier.width(8.dp))
+                                TextButton(
+                                    enabled = !requestActionBusy,
+                                    onClick = {
+                                        requestActionBusy = true
+                                        scope.launch {
+                                            runCatching { repo.rejectFriendRequest(targetUid) }
+                                                .onSuccess { requestState = ChatRequestState("rejected", incoming = false); Toast.makeText(context, "Request declined", Toast.LENGTH_SHORT).show() }
+                                                .onFailure { Toast.makeText(context, it.message ?: "Unable to decline request", Toast.LENGTH_SHORT).show() }
+                                            requestActionBusy = false
+                                        }
+                                    }
+                                ) { Text("Decline") }
+                            }
+                        }
+                    }
+                    !state.incoming && state.status == "pending" -> Card(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 12.dp, vertical = 8.dp)
+                    ) {
+                        Text(
+                            "Message request sent. You can send one message until it is accepted.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(12.dp)
+                        )
+                    }
+                    !state.incoming && state.status == "rejected" -> Card(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 12.dp, vertical = 8.dp)
+                    ) {
+                        Text(
+                            "Message request declined. You cannot send more messages.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.error,
+                            modifier = Modifier.padding(12.dp)
+                        )
+                    }
+                }
+            }
+        },
+        canSendMessages = !requestStateLoading && (isFriendUser || requestState == null),
         canEditMessage = { false },
         canDeleteForEveryone = false,
         onImageClick = { imageUrl ->
@@ -258,6 +366,7 @@ fun ChatDetailScreen(
                                 friendUid = targetUid,
                                 imageUrl = imageUrl
                             )
+                            if (!isFriendUser) requestState = ChatRequestState("pending", incoming = false)
                             pendingImageUri = null
                             pendingImageUrl = null
                             pendingImageCaption = ""

@@ -64,6 +64,8 @@ fun PureChatDetailScreen(
     formatDateHeader: (Long) -> String,
     onOpenPostLink: (String) -> Unit,
     renderImage: @Composable (String?, Modifier, ContentScale) -> Unit,
+    requestBanner: (@Composable () -> Unit)? = null,
+    canSendMessages: Boolean = true,
     canEditMessage: (PureMessage) -> Boolean = { true },
     onLoadMore: (() -> Unit)? = null,
     onImageClick: ((String) -> Unit)? = null,
@@ -326,7 +328,7 @@ fun PureChatDetailScreen(
                             .fillMaxWidth(),
                         verticalAlignment = Alignment.Bottom
                     ) {
-                        IconButton(onClick = onPickImage) {
+                        IconButton(onClick = onPickImage, enabled = canSendMessages) {
                             Icon(
                                 Icons.Default.Add,
                                 contentDescription = "Attach",
@@ -337,6 +339,7 @@ fun PureChatDetailScreen(
                         TextField(
                             value = input,
                             onValueChange = { input = it },
+                            enabled = canSendMessages,
                             modifier = Modifier.weight(1f),
                             placeholder = { Text("Message") },
                             maxLines = 4,
@@ -351,7 +354,7 @@ fun PureChatDetailScreen(
 
                         Spacer(Modifier.width(4.dp))
 
-                        val canSend = input.isNotBlank()
+                        val canSend = canSendMessages && input.isNotBlank()
                         IconButton(
                             onClick = {
                                 if (canSend) {
@@ -384,13 +387,18 @@ fun PureChatDetailScreen(
             }
         }
     ) { paddingValues ->
-
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(top = paddingValues.calculateTopPadding())
+                .background(MaterialTheme.colorScheme.surface)
+        ) {
+        requestBanner?.invoke()
         LazyColumn(
             state = listState,
             modifier = Modifier
-                .fillMaxSize()
+                .weight(1f)
                 .padding(
-                    top = paddingValues.calculateTopPadding(),
                     start = paddingValues.calculateStartPadding(LayoutDirection.Ltr),
                     end = paddingValues.calculateEndPadding(LayoutDirection.Ltr),
                     bottom = paddingValues.calculateBottomPadding()
@@ -424,6 +432,7 @@ fun PureChatDetailScreen(
                     }
                 }
             }
+        }
         }
     }
 
