@@ -55,7 +55,8 @@ class CustomChatClient(private val context: Context) {
         val url = BuildConfig.CUSTOM_CHAT_SERVER_URL
         require(url.startsWith("wss://")) { "Custom chat requires a wss:// URL" }
         val token = AuthSessionManager.requireAccessToken()
-        val owner = SupabaseProvider.client.auth.currentUserOrNull()?.id ?: error("No session")
+        val auth = SupabaseProvider.client.auth
+        val owner = auth.currentUserOrNull()?.id ?: error("No session")
         // Capture this user's database; never resolve a new user's DAO in callbacks.
         val db = AppDatabase.getInstance(context.applicationContext)
         val dao = db.chatDao()
