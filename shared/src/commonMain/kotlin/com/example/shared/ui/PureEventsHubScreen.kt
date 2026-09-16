@@ -32,6 +32,9 @@ import com.example.shared.model.EventCategory
 import com.example.shared.model.EventListItem
 import com.example.shared.model.EventStatus
 import com.example.shared.repository.EventRepository
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -54,8 +57,7 @@ fun PureEventsHubScreen(
     var isLoading by remember { mutableStateOf(cachedEvents == null) }
     var errorMessage by remember { mutableStateOf<String?>(null) }
 
-    fun refreshEvents() {
-        scope.launch {
+    fun refreshEvents() = scope.launch {
             val isDefaultFilter = selectedCategory == null && selectedStatus == null && selectedMode == null && searchQuery.isBlank()
             if (isDefaultFilter && events.isNotEmpty()) {
                 isLoading = false
@@ -81,11 +83,13 @@ fun PureEventsHubScreen(
                 }
             }
             isLoading = false
-        }
     }
 
     LaunchedEffect(selectedCategory, selectedStatus, selectedMode, searchQuery) {
-        refreshEvents()
+        while (currentCoroutineContext().isActive) {
+            refreshEvents().join()
+            delay(EVENTS_POLL_MS)
+        }
     }
 
     Scaffold(
@@ -329,6 +333,8 @@ fun PureEventsHubScreen(
         }
     }
 }
+
+private const val EVENTS_POLL_MS = 30_000L
 
 @Composable
 fun RichEventCard(

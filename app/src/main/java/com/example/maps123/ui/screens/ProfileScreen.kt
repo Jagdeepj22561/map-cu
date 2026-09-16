@@ -100,7 +100,10 @@ fun ProfileScreen(
     var commentPost by remember { mutableStateOf<Announcement?>(null) }
     var localCommentCounts by remember { mutableStateOf<Map<String, Int>>(emptyMap()) }
 
-    val currentUid = AuthRepository.currentUserId()
+    val currentUidState = produceState<String?>(initialValue = AuthRepository.currentUserId()) {
+        value = AuthRepository.awaitCurrentUserId()
+    }
+    val currentUid = currentUidState.value
     val canEditOwnProfile = !currentUid.isNullOrBlank() && user.uid == currentUid
     val isReadOnly = !canEditOwnProfile
 
@@ -412,7 +415,7 @@ fun ProfileScreen(
                     val body = commentText.trim()
                     if (body.isBlank()) return@InstagramCommentsSheet
                     val localComment = Comment(
-                        id = "local-${System.currentTimeMillis()}",
+                        id = java.util.UUID.randomUUID().toString(),
                         userId = currentUid.orEmpty(),
                         userName = authorName.ifBlank { "User" },
                         userProfilePic = authorPhoto,

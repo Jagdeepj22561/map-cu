@@ -9,10 +9,17 @@ import android.os.Build
 import androidx.core.app.NotificationCompat
 import com.example.maps123.MainActivity
 import com.example.maps123.data.firebase.FcmTokenSyncManager
+import com.example.maps123.data.repository.AnnouncementRepository
 import com.google.firebase.messaging.FirebaseMessagingService
 import com.google.firebase.messaging.RemoteMessage
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.launch
 
 class MyFirebaseMessagingService : FirebaseMessagingService() {
+    private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     override fun onMessageReceived(remoteMessage: RemoteMessage) {
         super.onMessageReceived(remoteMessage)
@@ -31,6 +38,7 @@ class MyFirebaseMessagingService : FirebaseMessagingService() {
         }
         if (data["kind"] == "post_created") {
             val postId = data["deep_link_post_id"] ?: return
+            refreshAnnouncementCache()
             showCampusNotification(
                 notificationId = "$postId:post_created".hashCode(),
                 postId = postId,
@@ -76,6 +84,18 @@ class MyFirebaseMessagingService : FirebaseMessagingService() {
     override fun onNewToken(token: String) {
         super.onNewToken(token)
         FcmTokenSyncManager.syncTokenIfChanged(applicationContext, token)
+    }
+
+    override fun onDestroy() {
+        serviceScope.cancel()
+        super.onDestroy()
+    }
+
+    /** Refresh Room while Firebase keeps the service process alive. */
+    private fun refreshAnnouncementCache() {
+        serviceScope.launch {
+            runCatching { AnnouncementRepository(applicationContext).refreshNow() }
+        }
     }
 
     private fun showChatNotification(chatId: String, title: String, body: String) {

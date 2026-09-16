@@ -21,6 +21,9 @@ import com.example.shared.model.TeamEventInfo
 import com.example.shared.model.TeamMemberInfo
 import com.example.shared.model.TeamRequirement
 import com.example.shared.repository.TeamRepository
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 
 @Composable
@@ -54,7 +57,7 @@ fun TeamEventSection(announcement: Announcement) {
         scope.launch {
             loading = true
             runCatching {
-                val mine = repo.getMyTeam(announcement.id)
+                val mine = repo.getMyTeamMembership(announcement.id)
                 val all = repo.getTeamsForAnnouncement(announcement.id)
                 val reqs = repo.getTeamRequirements(announcement.id)
                 val responded = repo.getMyRespondedRequirementIds(announcement.id)
@@ -70,7 +73,12 @@ fun TeamEventSection(announcement: Announcement) {
         }
     }
 
-    LaunchedEffect(announcement.id) { refreshAll() }
+    LaunchedEffect(announcement.id) {
+        while (currentCoroutineContext().isActive) {
+            refreshAll()
+            delay(30_000L)
+        }
+    }
 
     if (showCreateDialog) {
         var name by remember { mutableStateOf("${announcement.title} Team") }

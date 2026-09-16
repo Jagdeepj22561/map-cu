@@ -6,13 +6,9 @@ import com.example.maps123.data.local.AnnouncementCacheEntity
 import com.example.maps123.data.local.AppDatabase
 import com.example.maps123.data.local.toAnnouncement
 import com.example.maps123.data.local.toCacheEntity
-import com.example.maps123.data.supabase.SupabaseProvider
 import com.example.shared.model.Announcement
 import com.example.shared.repository.AnnouncementRemoteDataSource
 import com.example.shared.repository.IAnnouncementRepository
-import io.github.jan.supabase.realtime.channel
-import io.github.jan.supabase.realtime.postgresChangeFlow
-import io.github.jan.supabase.realtime.PostgresAction
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.sync.Mutex
@@ -28,6 +24,8 @@ class AnnouncementRepository(context: Context) : IAnnouncementRepository {
     // A refresh must not write an older response after an engagement mutation
     // has updated Room. This protects the cache from out-of-order responses.
     private val feedMutationMutex = Mutex()
+    private val syncLock = Any()
+    private var activeCollectors = 0
     private var syncJob: Job? = null
     private val _isInitialLoadRunning = MutableStateFlow(false)
     val isInitialLoadRunning: StateFlow<Boolean> = _isInitialLoadRunning.asStateFlow()
@@ -37,75 +35,48 @@ class AnnouncementRepository(context: Context) : IAnnouncementRepository {
     fun getAnnouncementsFlow(limit: Int): Flow<List<Announcement>> =
         dao.observeRecent(limit.coerceIn(1, 200))
             .map { it.map(AnnouncementCacheEntity::toAnnouncement) }
-            .onStart { startFeedSync() }
+            .onStart { retainFeedSync() }
+            .onCompletion { releaseFeedSync() }
 
-    fun startFeedSync() {
+    private fun retainFeedSync() = synchronized(syncLock) {
+        activeCollectors++
+        if (activeCollectors == 1) startFeedSyncLocked()
+    }
+
+    private fun releaseFeedSync() = synchronized(syncLock) {
+        activeCollectors = (activeCollectors - 1).coerceAtLeast(0)
+        if (activeCollectors == 0) stopSyncLocked()
+    }
+
+    fun startFeedSync() = synchronized(syncLock) { startFeedSyncLocked() }
+
+    private fun startFeedSyncLocked() {
         if (syncJob?.isActive == true) return
         syncJob = scope.launch {
             // First load: only show initial loading spinner if local cache is empty
             val hasLocalCache = dao.getCount() > 0
-            refreshFeed(showLoading = !hasLocalCache)
-
-            // Setup Realtime subscription for instant updates on announcements, comments, and likes
-            runCatching {
-                val channel = SupabaseProvider.client.channel("announcements-feed")
-
-                launch {
-                    channel.postgresChangeFlow<PostgresAction.Insert>(schema = "public") {
-                        table = "announcements"
-                    }.collect {
-                        Log.d("AnnouncementRepo", "New announcement inserted, refreshing feed")
-                        runCatching { refreshFeed(false, force = true) }
-                    }
-                }
-
-                launch {
-                    channel.postgresChangeFlow<PostgresAction.Delete>(schema = "public") {
-                        table = "announcements"
-                    }.collect { action ->
-                        val id = action.oldRecord["id"]?.toString()
-                        if (id != null) {
-                            dao.deleteById(id)
-                        } else {
-                            runCatching { refreshFeed(false, force = true) }
-                        }
-                    }
-                }
-
-                launch {
-                    channel.postgresChangeFlow<PostgresAction.Insert>(schema = "public") {
-                        table = "announcement_comments"
-                    }.collect {
-                        Log.d("AnnouncementRepo", "New comment inserted, refreshing feed")
-                        runCatching { refreshFeed(false, force = true) }
-                    }
-                }
-
-                launch {
-                    channel.postgresChangeFlow<PostgresAction.Insert>(schema = "public") {
-                        table = "announcement_likes"
-                    }.collect {
-                        Log.d("AnnouncementRepo", "New like inserted, refreshing feed")
-                        runCatching { refreshFeed(false, force = true) }
-                    }
-                }
-
-                channel.subscribe()
-                Log.i("AnnouncementRepo", "Realtime subscription active for announcements feed")
-            }.onFailure {
-                Log.w("AnnouncementRepo", "Failed to start Realtime subscription, falling back to light polling", it)
-            }
-
-            // Light polling fallback at 60s intervals instead of aggressive 15s
+            // A timestamp-only freshness check cannot see likes, unlikes,
+            // comments, or comment deletions. Refresh the complete 20-post
+            // window while it is actually observed instead of depending on
+            // Supabase Realtime being enabled for every table.
+            refreshFeed(showLoading = !hasLocalCache, force = true)
             while (isActive) {
-                delay(60_000)
-                runCatching { refreshFeed(false) }
+                delay(FEED_POLL_MS)
+                runCatching { refreshFeed(false, force = true) }
                     .onFailure { Log.w("AnnouncementRepo", "Feed refresh failed", it) }
             }
         }
     }
 
-    fun stopSync() { syncJob?.cancel(); syncJob = null }
+    fun stopSync() = synchronized(syncLock) {
+        activeCollectors = 0
+        stopSyncLocked()
+    }
+
+    private fun stopSyncLocked() {
+        syncJob?.cancel()
+        syncJob = null
+    }
 
     suspend fun getCachedAnnouncements(limit: Int = 20) =
         dao.getRecent(limit.coerceIn(1, 200)).map(AnnouncementCacheEntity::toAnnouncement)
@@ -114,6 +85,10 @@ class AnnouncementRepository(context: Context) : IAnnouncementRepository {
 
     override suspend fun getAnnouncement(id: String): Announcement? {
         dao.getById(id)?.toAnnouncement()?.let { return it }
+        return refreshAnnouncement(id)
+    }
+
+    suspend fun refreshAnnouncement(id: String): Announcement? {
         val result = remote.getAnnouncement(id) ?: run {
             dao.deleteById(id)
             return null
@@ -123,7 +98,10 @@ class AnnouncementRepository(context: Context) : IAnnouncementRepository {
     }
 
     override fun getAnnouncementFlow(id: String): Flow<Announcement?> =
-        dao.observeById(id).map { it?.toAnnouncement() }.onStart { getAnnouncement(id) }
+        dao.observeById(id)
+            .map { it?.toAnnouncement() }
+            .onStart { retainFeedSync() }
+            .onCompletion { releaseFeedSync() }
 
     override suspend fun createAnnouncement(announcement: Announcement) {
         remote.createAnnouncement(announcement)
@@ -158,7 +136,7 @@ class AnnouncementRepository(context: Context) : IAnnouncementRepository {
 
     suspend fun addComment(announcementId: String, text: String, localComment: com.example.shared.model.Comment) {
         feedMutationMutex.withLock {
-            remote.addComment(announcementId, text)
+            remote.addComment(announcementId, text, localComment.id)
             updateCachedAnnouncement(announcementId) { announcement ->
                 announcement.copy(comments = announcement.comments + (localComment.id to localComment))
             }
@@ -207,10 +185,18 @@ class AnnouncementRepository(context: Context) : IAnnouncementRepository {
                 val announcements = remote.loadAnnouncements(20)
                 if (announcements.isNotEmpty()) {
                     dao.insertAll(announcements.map(Announcement::toCacheEntity))
+                    dao.deleteRecentMissing(
+                        minTimestamp = announcements.minOf(Announcement::timestamp),
+                        keepIds = announcements.map(Announcement::id)
+                    )
                 } else {
                     dao.clearAll()
                 }
             }
         } finally { if (showLoading) _isInitialLoadRunning.value = false }
+    }
+
+    private companion object {
+        const val FEED_POLL_MS = 30_000L
     }
 }

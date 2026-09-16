@@ -524,4 +524,33 @@ class TeamRepository {
             )
         }.getOrNull()
     }
+
+    /** Loads the current user's pending state for all visible teams in one query. */
+    suspend fun getMyPendingJoinRequestsForTeams(
+        teamIds: List<String>
+    ): Map<String, com.example.shared.model.JoinRequest> {
+        val uid = client.auth.currentUserOrNull()?.id ?: return emptyMap()
+        if (teamIds.isEmpty()) return emptyMap()
+        return client.from("join_requests").select {
+            filter {
+                eq("requester_id", uid)
+                eq("status", "pending")
+                isIn("team_id", teamIds.distinct())
+            }
+            order("created_at", Order.DESCENDING)
+        }.decodeList<JoinRequestRow>()
+            .distinctBy(JoinRequestRow::teamId)
+            .associate { row ->
+                row.teamId to com.example.shared.model.JoinRequest(
+                    id = row.id,
+                    teamId = row.teamId,
+                    requesterId = row.requesterId,
+                    requesterName = "",
+                    message = row.message,
+                    status = row.status,
+                    reviewedBy = row.reviewedBy,
+                    createdAt = row.createdAt
+                )
+            }
+    }
 }

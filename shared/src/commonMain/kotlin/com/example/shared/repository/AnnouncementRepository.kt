@@ -19,6 +19,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.onCompletion
 import kotlinx.coroutines.flow.onStart
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
@@ -26,9 +27,8 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
-import kotlin.time.Instant
 
-private const val FEED_REFRESH_MS = 60_000L
+private const val FEED_REFRESH_MS = 30_000L
 
 /**
  * The single cross-platform owner of announcement network operations and DTO
@@ -138,20 +138,23 @@ class AnnouncementRemoteDataSource(
         }
     }
 
-    suspend fun addComment(announcementId: String, text: String) {
+    suspend fun addComment(announcementId: String, text: String, commentId: String? = null) {
         require(text.isNotBlank()) { "Comment cannot be empty" }
-        client.from("announcement_comments").insert(
-            AnnouncementCommentInsert(announcementId, currentUid(), text.trim())
-        )
+        val uid = currentUid()
+        if (commentId == null) {
+            client.from("announcement_comments").insert(
+                AnnouncementCommentInsert(announcementId, uid, text.trim())
+            )
+        } else {
+            client.from("announcement_comments").insert(
+                AnnouncementCommentInsertWithId(commentId, announcementId, uid, text.trim())
+            )
+        }
     }
 
     suspend fun deleteComment(commentId: String) {
-        client.from("announcement_comments").delete {
-            filter {
-                eq("id", commentId)
-                eq("author_id", currentUid())
-            }
-        }
+        currentUid()
+        EventNotificationClient.deleteOwnAnnouncementComment(commentId)
     }
 
     private suspend fun currentUid(): String {
@@ -167,10 +170,24 @@ class AnnouncementRepository(
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private val announcements = MutableStateFlow<List<Announcement>>(emptyList())
     private val refreshMutex = Mutex()
+    private val collectorMutex = Mutex()
+    private var activeCollectors = 0
     private var syncJob: Job? = null
 
     override fun getAnnouncementsFlow(): Flow<List<Announcement>> =
-        announcements.onStart { startSync() }
+        announcements
+            .onStart { retainSync() }
+            .onCompletion { releaseSync() }
+
+    private suspend fun retainSync() = collectorMutex.withLock {
+        activeCollectors++
+        if (activeCollectors == 1) startSync()
+    }
+
+    private suspend fun releaseSync() = collectorMutex.withLock {
+        activeCollectors = (activeCollectors - 1).coerceAtLeast(0)
+        if (activeCollectors == 0) stopSync()
+    }
 
     fun startSync() {
         if (syncJob?.isActive == true) return
@@ -206,9 +223,10 @@ class AnnouncementRepository(
     override fun getAnnouncementFlow(id: String): Flow<Announcement?> =
         announcements.map { feed -> feed.firstOrNull { it.id == id } }
             .onStart {
-                startSync()
+                retainSync()
                 getAnnouncement(id)
             }
+            .onCompletion { releaseSync() }
 
     override suspend fun createAnnouncement(announcement: Announcement) {
         remote.createAnnouncement(announcement)
@@ -360,6 +378,14 @@ private data class AnnouncementCommentInsert(
 )
 
 @Serializable
+private data class AnnouncementCommentInsertWithId(
+    val id: String,
+    @SerialName("announcement_id") val announcementId: String,
+    @SerialName("author_id") val authorId: String,
+    val body: String
+)
+
+@Serializable
 private data class CommentProfile(
     val name: String = "",
     @SerialName("profile_pic_url") val profilePicUrl: String = ""
@@ -380,7 +406,7 @@ private data class AnnouncementCommentRow(
         userName = profile?.name.orEmpty(),
         userProfilePic = profile?.profilePicUrl?.takeIf(String::isNotBlank),
         text = body,
-        timestamp = runCatching { Instant.parse(createdAt).toEpochMilliseconds() }.getOrDefault(0L)
+        timestamp = parseDatabaseTimestampOrNull(createdAt) ?: 0L
     )
 }
 

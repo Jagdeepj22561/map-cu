@@ -3,6 +3,7 @@ package com.example.shared.data
 import io.github.jan.supabase.auth.auth
 import io.ktor.client.HttpClient
 import io.ktor.client.request.header
+import io.ktor.client.request.delete
 import io.ktor.client.request.post
 import io.ktor.client.request.setBody
 import io.ktor.http.ContentType
@@ -47,6 +48,22 @@ object EventNotificationClient {
             if (attempt < MAX_ATTEMPTS - 1) delay(RETRY_DELAY_MS * (attempt + 1))
         }
         return false
+    }
+
+    /**
+     * Temporary authenticated backend path for projects where the original
+     * comment table was deployed without an owner-delete RLS policy. The
+     * backend verifies the JWT and author before its service-role delete.
+     */
+    suspend fun deleteOwnAnnouncementComment(commentId: String) {
+        val baseUrl = NotificationBackendConfig.url.trimEnd('/')
+        require(baseUrl.isNotBlank()) { "Backend URL is unavailable" }
+        val accessToken = SupabaseClientProvider.client.auth.currentSessionOrNull()?.accessToken
+            ?: error("Login required")
+        val response = httpClient.delete("$baseUrl/announcements/comments/$commentId") {
+            header(HttpHeaders.Authorization, "Bearer $accessToken")
+        }
+        check(response.status.value in 200..299) { "Unable to delete comment" }
     }
 
     private const val MAX_ATTEMPTS = 3

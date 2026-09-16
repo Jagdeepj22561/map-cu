@@ -95,7 +95,17 @@ fun AnnouncementsScreen(
     var localLikes by remember { mutableStateOf<Map<String, Boolean>>(emptyMap()) }
     var localCommentCounts by remember { mutableStateOf<Map<String, Int>>(emptyMap()) }
 
-    val currentUid = AuthRepository.currentUserId()
+    // A comments sheet is a local snapshot. Replace it whenever the cached
+    // feed receives another user's comment/delete so an open sheet stays live.
+    LaunchedEffect(announcements, commentPost?.id) {
+        val openId = commentPost?.id ?: return@LaunchedEffect
+        announcements.firstOrNull { it.id == openId }?.let { commentPost = it }
+    }
+
+    val currentUidState = produceState<String?>(initialValue = AuthRepository.currentUserId()) {
+        value = AuthRepository.awaitCurrentUserId()
+    }
+    val currentUid = currentUidState.value
 
     val userRepository = remember { UserRepository(context) }
     val currentUserFlow = remember(currentUid, userRepository) {
@@ -377,7 +387,7 @@ fun AnnouncementsScreen(
                     val body = commentText.trim()
                     if (body.isBlank()) return@InstagramCommentsSheet
                     val localComment = Comment(
-                        id = "local-${System.currentTimeMillis()}",
+                        id = UUID.randomUUID().toString(),
                         userId = currentUid.orEmpty(),
                         userName = currentUser?.name.orEmpty().ifBlank { "User" },
                         userProfilePic = currentUser?.profilePicUrl,

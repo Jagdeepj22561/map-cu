@@ -54,12 +54,29 @@ fun AnnouncementDetailScreen(
     var showShareDialog by remember { mutableStateOf(false) }
     var saved by remember(announcementId) { mutableStateOf(false) }
 
-    val currentUid = AuthRepository.currentUserId()
+    val currentUidState = produceState<String?>(initialValue = AuthRepository.currentUserId()) {
+        value = AuthRepository.awaitCurrentUserId()
+    }
+    val currentUid = currentUidState.value
+    val observedPost by remember(repo, announcementId) {
+        repo.getAnnouncementFlow(announcementId)
+    }.collectAsState(initial = null)
+
+    // Keep this screen connected to Room. Remote polling and optimistic
+    // mutations both update the same cached row, so likes/comments cannot get
+    // stuck in the snapshot that happened to exist when the screen opened.
+    LaunchedEffect(observedPost) {
+        observedPost?.let {
+            post = it
+            loading = false
+            errorMessage = null
+        }
+    }
 
     LaunchedEffect(announcementId) {
         loading = true
         errorMessage = null
-        val loadedPost = runCatching { repo.getAnnouncement(announcementId) }
+        val loadedPost = runCatching { repo.refreshAnnouncement(announcementId) }
             .onFailure { errorMessage = it.message ?: "Failed to open post" }
             .getOrNull()
         if (loadedPost == null) {

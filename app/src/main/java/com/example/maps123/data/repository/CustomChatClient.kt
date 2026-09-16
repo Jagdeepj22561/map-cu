@@ -8,14 +8,12 @@ import com.example.maps123.data.local.AppDatabase
 import com.example.maps123.data.local.ChatEntity
 import com.example.maps123.data.local.MessageEntity
 import com.example.maps123.data.supabase.SupabaseProvider
+import com.example.shared.repository.parseDatabaseTimestampOrNull
 import io.github.jan.supabase.auth.auth
 import kotlinx.coroutines.*
 import kotlinx.coroutines.channels.Channel
 import okhttp3.*
 import org.json.JSONObject
-import java.time.Instant
-import java.time.OffsetDateTime
-import java.time.format.DateTimeFormatter
 import java.util.concurrent.TimeUnit
 
 /** One foreground socket, independent of the selected screen. Room is the outbox/history. */
@@ -171,13 +169,8 @@ class CustomChatClient(private val context: Context) {
          * the whole socket before either device could send or receive anything.
          */
         internal fun parseServerTimestamp(value: String): Long {
-            val normalized = value.trim().replace(' ', 'T')
-            return runCatching { Instant.parse(normalized).toEpochMilli() }
-                .recoverCatching {
-                    OffsetDateTime.parse(normalized, DateTimeFormatter.ISO_OFFSET_DATE_TIME)
-                        .toInstant().toEpochMilli()
-                }
-                .getOrElse {
+            return parseDatabaseTimestampOrNull(value)
+                ?: run {
                     Log.w(TAG, "Server supplied an invalid message timestamp; using receipt time")
                     System.currentTimeMillis()
                 }

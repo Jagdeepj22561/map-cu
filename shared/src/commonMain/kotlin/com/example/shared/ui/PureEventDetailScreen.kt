@@ -147,15 +147,9 @@ fun PureEventDetailScreen(
                     joinRequestsForMyTeam = emptyList()
                 }
 
-                // Check pending join requests for other teams
-                val pendingMap = mutableMapOf<String, JoinRequest>()
-                otherTeams.forEach { t ->
-                    val req = teamRepository.getMyJoinRequestForTeam(t.id)
-                    if (req != null && req.status == "pending") {
-                        pendingMap[t.id] = req
-                    }
-                }
-                myPendingRequestsByTeamId = pendingMap
+                // One batch query replaces one request per visible team.
+                myPendingRequestsByTeamId = teamRepository
+                    .getMyPendingJoinRequestsForTeams(otherTeams.map(TeamEventInfo::id))
             }.onFailure {
                 if (!silent && otherTeams.isEmpty() && myTeam == null) {
                     teamStatusMessage = it.message ?: "Failed to refresh teams"
@@ -177,10 +171,27 @@ fun PureEventDetailScreen(
     // Live polling when viewing the screen
     LaunchedEffect(announcement.id, selectedTab, isTeamMode) {
         if (isTeamMode) {
-            val pollDelayMs = if (selectedTab == 2) 3000L else 10000L
+            val pollDelayMs = if (selectedTab == 2) 15_000L else 30_000L
             while (currentCoroutineContext().isActive) {
                 delay(pollDelayMs)
                 refreshTeams(silent = true)
+            }
+        }
+    }
+
+    // Registration totals and organizer timeline changes are also remote
+    // state. Keep them fresh without requiring users to leave and reopen.
+    LaunchedEffect(announcement.id, currentUid, selectedTab) {
+        while (currentCoroutineContext().isActive) {
+            delay(30_000L)
+            participantCount = eventRepository.getRegistrationCount(announcement.id)
+            if (currentUid != null) {
+                isSoloRegistered = eventRepository.isRegisteredForEvent(announcement.id)
+            }
+            if (selectedTab == 1) {
+                val items = eventRepository.getEventTimelineItems(announcement.id)
+                timelineItems = items
+                EventCache.saveTimeline(announcement.id, items)
             }
         }
     }

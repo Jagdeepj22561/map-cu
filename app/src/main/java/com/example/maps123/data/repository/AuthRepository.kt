@@ -121,6 +121,18 @@ object AuthRepository {
 
     fun currentUserId(): String? = SupabaseProvider.client.auth.currentUserOrNull()?.id
 
+    /**
+     * Waits for the persisted Supabase session to be restored before reading the
+     * user ID. Compose screens can start before Auth has finished initializing,
+     * so a one-time synchronous read can incorrectly remain null for the whole
+     * lifetime of the screen.
+     */
+    suspend fun awaitCurrentUserId(): String? {
+        val auth = SupabaseProvider.client.auth
+        auth.awaitInitialization()
+        return auth.currentUserOrNull()?.id
+    }
+
     fun currentUserEmail(): String? = SupabaseProvider.client.auth.currentUserOrNull()?.email
 
     suspend fun logout(): Result<Unit> = withContext(Dispatchers.IO) {
