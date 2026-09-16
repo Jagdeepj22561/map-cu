@@ -72,6 +72,7 @@ class TeamRepository {
         runCatching {
             client.from("event_team_members").insert(MemberInsert(teamId, uid, role = "owner"))
         }
+        EventNotificationClient.dispatch("team_created", teamId)
         return teamId
     }
 
@@ -102,6 +103,18 @@ class TeamRepository {
                 else -> msg.ifBlank { "Unable to post requirement." }
             }
             error(friendly)
+        }
+        val createdRequirement = client.from("team_requirements").select {
+            filter {
+                eq("announcement_id", announcementId)
+                eq("author_id", uid)
+                eq("content", trimmed)
+            }
+            order("created_at", Order.DESCENDING)
+            limit(1)
+        }.decodeList<RequirementRow>().firstOrNull()
+        if (createdRequirement != null) {
+            EventNotificationClient.dispatch("team_requirement_created", createdRequirement.id)
         }
     }
 
@@ -138,6 +151,7 @@ class TeamRepository {
             }
             error(friendly)
         }
+        EventNotificationClient.dispatch("team_requirement_interest", requirementId)
     }
 
     fun myUserId(): String? = client.auth.currentUserOrNull()?.id

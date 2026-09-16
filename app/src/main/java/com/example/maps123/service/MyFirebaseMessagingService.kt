@@ -19,6 +19,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeoutOrNull
 
 class MyFirebaseMessagingService : FirebaseMessagingService() {
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
@@ -30,9 +32,7 @@ class MyFirebaseMessagingService : FirebaseMessagingService() {
         if (data["kind"] == "custom_chat") {
             // Ignore a targeted message if Android is currently signed in as
             // a different account. Older chat payloads may omit this field.
-            data["recipientId"]?.let { recipientId ->
-                if (recipientId != com.example.maps123.data.repository.AuthRepository.currentUserId()) return
-            }
+            if (!isCurrentRecipient(data["recipientId"])) return
             data["deep_link_chat_id"]?.let {
                 showChatNotification(it, "New message", "Open Campus Map to read your message")
                 CampusUpdateBus.publish(
@@ -63,10 +63,13 @@ class MyFirebaseMessagingService : FirebaseMessagingService() {
                 "team_join_requested",
                 "team_join_approved",
                 "team_join_rejected",
-                "team_member_joined"
+                "team_member_joined",
+                "team_created",
+                "team_requirement_created",
+                "team_requirement_interest"
             )
         ) {
-            if (data["recipientId"] != com.example.maps123.data.repository.AuthRepository.currentUserId()) return
+            if (!isCurrentRecipient(data["recipientId"])) return
             val postId = data["deep_link_post_id"] ?: return
             CampusUpdateBus.publish(
                 CampusUpdateEvent(
@@ -89,7 +92,7 @@ class MyFirebaseMessagingService : FirebaseMessagingService() {
                 "friend_request_rejected"
             )
         ) {
-            if (data["recipientId"] != com.example.maps123.data.repository.AuthRepository.currentUserId()) return
+            if (!isCurrentRecipient(data["recipientId"])) return
             CampusUpdateBus.publish(
                 CampusUpdateEvent(
                     key = "${data["kind"]}:${data["requestId"]}",
@@ -128,6 +131,17 @@ class MyFirebaseMessagingService : FirebaseMessagingService() {
 
     private fun notificationBody(message: RemoteMessage, fallback: String) =
         message.notification?.body ?: message.data["notification_body"] ?: fallback
+
+    /** A killed process must restore Supabase Auth before checking a targeted FCM payload. */
+    private fun isCurrentRecipient(recipientId: String?): Boolean {
+        if (recipientId.isNullOrBlank()) return true
+        val currentUid = runBlocking {
+            withTimeoutOrNull(2_500L) {
+                com.example.maps123.data.repository.AuthRepository.awaitCurrentUserId()
+            }
+        }
+        return currentUid == recipientId
+    }
 
     private fun showChatNotification(chatId: String, title: String, body: String) {
         val channelId = "chat_notifications"
