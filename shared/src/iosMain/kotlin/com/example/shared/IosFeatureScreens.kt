@@ -7,12 +7,17 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.DeleteSweep
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
+import androidx.compose.material3.Card
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -41,6 +46,7 @@ import com.example.shared.model.Announcement
 import com.example.shared.model.PureChat
 import com.example.shared.repository.AnnouncementRepository
 import com.example.shared.repository.IosChatRepository
+import com.example.shared.repository.IosChatRequestState
 import com.example.shared.repository.IosPreferencesStore
 import com.example.shared.repository.IosUserProfile
 import com.example.shared.repository.IosUserStore
@@ -70,11 +76,32 @@ internal fun IosChatDetailContent(
     var searchQuery by remember { mutableStateOf("") }
     var isSearchActive by remember { mutableStateOf(false) }
     var errorMessage by remember { mutableStateOf<String?>(null) }
+    var requestState by remember { mutableStateOf<IosChatRequestState?>(null) }
+    var requestActionBusy by remember { mutableStateOf(false) }
+    var isFriendUser by remember { mutableStateOf(false) }
+    var requestStateLoading by remember { mutableStateOf(true) }
 
     LaunchedEffect(chat.chatId) {
         repository.setActiveChat(chat.chatId)
         runCatching { repository.markChatRead(chat.chatId) }
         runCatching { isBlocked = repository.isUserBlocked(chat.friendUid) }
+        runCatching {
+            isFriendUser = repository.isFriend(chat.friendUid)
+            requestState = repository.getChatRequestState(chat.friendUid)
+        }
+        requestStateLoading = false
+    }
+
+    LaunchedEffect(chat.chatId, chat.friendUid) {
+        while (true) {
+            runCatching {
+                val friend = repository.isFriend(chat.friendUid)
+                val state = repository.getChatRequestState(chat.friendUid)
+                isFriendUser = friend
+                requestState = if (friend) null else state
+            }
+            delay(10_000)
+        }
     }
 
     DisposableEffect(chat.chatId) {
@@ -94,6 +121,7 @@ internal fun IosChatDetailContent(
             scope.launch {
                 runCatching {
                     repository.sendMessage(chat.chatId, content, chat.friendUid)
+                    if (!isFriendUser) requestState = IosChatRequestState("pending", incoming = false)
                 }.onFailure { errorMessage = it.message ?: "Failed to send message" }
             }
         },
@@ -148,6 +176,79 @@ internal fun IosChatDetailContent(
         formatTime = ::iosRelativeTime,
         formatDateHeader = ::iosDateHeader,
         onOpenPostLink = {},
+        requestBanner = {
+            requestState?.let { state ->
+                when {
+                    state.incoming && state.status == "pending" -> Card(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 12.dp, vertical = 8.dp)
+                    ) {
+                        Column(Modifier.padding(14.dp)) {
+                            Text("Message request", style = MaterialTheme.typography.titleSmall)
+                            Text(
+                                "This person wants to start a conversation. Accept to reply, or decline the request.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.padding(top = 3.dp)
+                            )
+                            Row(Modifier.padding(top = 8.dp)) {
+                                Button(
+                                    enabled = !requestActionBusy,
+                                    onClick = {
+                                        requestActionBusy = true
+                                        scope.launch {
+                                            runCatching { repository.acceptFriendRequest(chat.friendUid) }
+                                                .onSuccess { isFriendUser = true; requestState = null }
+                                                .onFailure { errorMessage = it.message ?: "Unable to accept request" }
+                                            requestActionBusy = false
+                                        }
+                                    }
+                                ) { Text("Accept") }
+                                Spacer(Modifier.width(8.dp))
+                                TextButton(
+                                    enabled = !requestActionBusy,
+                                    onClick = {
+                                        requestActionBusy = true
+                                        scope.launch {
+                                            runCatching { repository.rejectFriendRequest(chat.friendUid) }
+                                                .onSuccess { requestState = IosChatRequestState("rejected", incoming = false) }
+                                                .onFailure { errorMessage = it.message ?: "Unable to decline request" }
+                                            requestActionBusy = false
+                                        }
+                                    }
+                                ) { Text("Decline") }
+                            }
+                        }
+                    }
+                    state.status == "rejected" -> Card(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 12.dp, vertical = 8.dp)
+                    ) {
+                        Text(
+                            "Message request declined. You cannot send messages in this chat.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.error,
+                            modifier = Modifier.padding(12.dp)
+                        )
+                    }
+                    !state.incoming && state.status == "pending" -> Card(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 12.dp, vertical = 8.dp)
+                    ) {
+                        Text(
+                            "Message request sent. You can send one message until it is accepted.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(12.dp)
+                        )
+                    }
+                }
+            }
+        },
+        canSendMessages = !requestStateLoading && (isFriendUser || requestState == null),
         renderImage = { url, modifier, scale ->
             IosRemoteImage(url, modifier, scale)
         }

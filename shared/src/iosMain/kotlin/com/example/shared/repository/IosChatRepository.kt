@@ -7,6 +7,8 @@ import cocoapods.FirebaseFirestore.FIRDocumentChangeType
 import cocoapods.FirebaseFirestore.FIRSetOptions
 import cocoapods.FirebaseFirestore.FIRFieldValue
 import com.example.shared.GeoPoint
+import com.example.shared.data.EventNotificationClient
+import com.example.shared.data.SupabaseClientProvider
 import com.example.shared.model.PureChat
 import com.example.shared.model.PureFriendRequest
 import com.example.shared.model.PureGroup
@@ -16,6 +18,11 @@ import com.example.shared.model.PureUser
 import com.example.shared.utils.GeoUtils
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.*
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.SerialName
+import kotlinx.serialization.Serializable
+import io.github.jan.supabase.postgrest.from
 import platform.Foundation.*
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
@@ -23,6 +30,37 @@ import kotlin.coroutines.resumeWithException
 data class IosGroupMember(
     val user: IosUserProfile,
     val role: String
+)
+
+data class IosChatRequestState(val status: String, val incoming: Boolean)
+
+@Serializable
+private data class IosFriendshipRow(
+    @SerialName("user_id") val userId: String,
+    @SerialName("friend_id") val friendId: String
+)
+
+@Serializable
+private data class IosFriendRequestRow(
+    val id: String,
+    @SerialName("sender_id") val senderId: String,
+    @SerialName("receiver_id") val receiverId: String,
+    val status: String = "pending",
+    @SerialName("created_at") val createdAt: String = ""
+)
+
+@Serializable
+private data class IosBasicProfileRow(
+    val id: String,
+    val email: String = "",
+    val name: String = ""
+)
+
+@Serializable
+private data class IosFriendRequestInsert(
+    @SerialName("sender_id") val senderId: String,
+    @SerialName("receiver_id") val receiverId: String,
+    val status: String = "pending"
 )
 
 private object IosChatStore {
@@ -40,6 +78,7 @@ private object IosChatStore {
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private var syncJob: Job? = null
+    private var customChat: IosCustomChatClient? = null
     private var loadedCacheOwnerUid: String? = IosSessionStore.current()?.uid
     private var lastGroupsRefreshAt = 0L
 
@@ -61,6 +100,13 @@ private object IosChatStore {
 
     fun startSync() {
         ensureLocalCacheLoaded()
+        if (customChat == null) {
+            customChat = IosCustomChatClient().also { client ->
+                client.start(scope) { event, transport ->
+                    handleCustomEvent(event, transport)
+                }
+            }
+        }
         if (syncJob != null) return
         syncJob = scope.launch {
             runCatching { syncOnce() }
@@ -74,6 +120,8 @@ private object IosChatStore {
     fun stopSync() {
         syncJob?.cancel()
         syncJob = null
+        customChat?.stop()
+        customChat = null
     }
 
     fun resetSessionState() {
@@ -132,45 +180,89 @@ private object IosChatStore {
         syncChats(uid)
     }
 
-    private suspend fun syncFriendsAndRequests(uid: String) = coroutineScope {
-        val friendSnapshot = async {
-            suspendCancellableCoroutine<FIRQuerySnapshot?> { continuation ->
-                IosFirestoreRefs.userFriends(uid).getDocumentsWithCompletion { snapshot, error ->
-                    if (error != null) continuation.resumeWithException(Throwable(error.toString()))
-                    else continuation.resume(snapshot)
+    /** Apply custom-server deliveries to the same observable cache used by iOS UI. */
+    private suspend fun handleCustomEvent(
+        event: kotlinx.serialization.json.JsonObject,
+        transport: IosCustomChatClient
+    ) {
+        when (event["type"]?.jsonPrimitive?.content.orEmpty()) {
+            "message" -> {
+                val row = event["message"]?.jsonObject ?: return
+                val messageId = row["id"]?.jsonPrimitive?.content.orEmpty()
+                val chatId = row["chat_id"]?.jsonPrimitive?.content.orEmpty()
+                val senderId = row["sender_id"]?.jsonPrimitive?.content.orEmpty()
+                if (messageId.isBlank() || chatId.isBlank() || senderId.isBlank()) return
+                val timestamp = parseDatabaseTimestampOrNull(
+                    row["created_at"]?.jsonPrimitive?.content.orEmpty()
+                ) ?: currentTimeMillis()
+                val content = row["content"]?.jsonPrimitive?.content.orEmpty()
+                val imageUrl = row["image_url"]?.jsonPrimitive?.content
+                    ?.takeIf { it.isNotBlank() && it != "null" }
+                val existingMessages = messagesFlow(chatId).value
+                if (existingMessages.none { it.messageId == messageId }) {
+                    val read = activeChatId == chatId
+                    updateChatMessages(
+                        chatId,
+                        (existingMessages + PureMessage(
+                            messageId = messageId,
+                            chatId = chatId,
+                            senderId = senderId,
+                            content = content,
+                            timestamp = timestamp,
+                            isRead = read,
+                            imageUrl = imageUrl,
+                            type = row["type"]?.jsonPrimitive?.content
+                                ?.ifBlank { null }
+                                ?: if (imageUrl == null) "TEXT" else "IMAGE"
+                        )).sortedBy(PureMessage::timestamp)
+                    )
+                    val sender = IosUserStore.cachedUser(senderId) ?: IosUserStore.getUser(senderId)
+                    val current = chats.value.firstOrNull { it.chatId == chatId }
+                    updateChatPreview(
+                        chatId = chatId,
+                        friendUid = senderId,
+                        friendName = sender?.name?.ifBlank { "Friend" } ?: "Friend",
+                        friendProfilePicUrl = sender?.profilePicUrl,
+                        lastMessage = if (imageUrl == null) content else "Image",
+                        lastMessageTime = maxOf(timestamp, current?.lastMessageTime ?: 0L),
+                        unreadCount = (current?.unreadCount ?: 0) + if (read) 0 else 1
+                    )
                 }
+                // ACK only after the local cache and unread preview are updated.
+                transport.acknowledge(messageId)
             }
+            "accepted", "acked", "synced", "ready", "error" -> Unit
         }
-        val requestSnapshot = async {
-            suspendCancellableCoroutine<FIRQuerySnapshot?> { continuation ->
-                IosFirestoreRefs.userFriendRequests(uid).getDocumentsWithCompletion { snapshot, error ->
-                    if (error != null) continuation.resumeWithException(Throwable(error.toString()))
-                    else continuation.resume(snapshot)
-                }
-            }
-        }
+    }
 
-        val friendIds = friendSnapshot.await()?.documents.orEmpty().mapNotNull { raw ->
-            val doc = raw as? FIRDocumentSnapshot ?: return@mapNotNull null
-            doc.data()?.asStringMap()?.get("uid").stringValue().ifBlank { doc.documentID }
-                .takeIf(String::isNotBlank)
-        }.distinct()
+    private suspend fun syncFriendsAndRequests(uid: String) = coroutineScope {
+        val client = SupabaseClientProvider.client
+        val friendIds = client.from("friendships").select {
+            filter { eq("user_id", uid) }
+        }.decodeList<IosFriendshipRow>().map { it.friendId }.distinct()
         friends.value = friendIds.mapNotNull { friendId ->
             IosUserStore.cachedUser(friendId) ?: IosUserStore.getUser(friendId)
         }.map(IosUserProfile::toPureUser).sortedBy { it.name.lowercase() }
         persistFriends()
 
-        friendRequests.value = requestSnapshot.await()?.documents.orEmpty().mapNotNull { raw ->
-            val doc = raw as? FIRDocumentSnapshot ?: return@mapNotNull null
-            val data = doc.data()?.asStringMap().orEmpty()
-            (data + mapOf(
-                "requestId" to doc.documentID,
-                "senderId" to data["senderId"].stringValue().ifBlank {
-                    data["senderUid"].stringValue().ifBlank { doc.documentID }
-                },
-                "receiverId" to uid
-            )).toPureFriendRequest()
-        }.filter { it.status.equals("PENDING", ignoreCase = true) }
+        val requestRows = client.from("friend_requests").select {
+            filter {
+                eq("receiver_id", uid)
+                eq("status", "pending")
+            }
+        }.decodeList<IosFriendRequestRow>()
+        friendRequests.value = requestRows.map { row ->
+            val sender = IosUserStore.cachedUser(row.senderId) ?: IosUserStore.getUser(row.senderId)
+            PureFriendRequest(
+                requestId = row.id,
+                senderId = row.senderId,
+                senderName = sender?.name.orEmpty(),
+                senderEmail = sender?.email.orEmpty(),
+                receiverId = row.receiverId,
+                status = row.status.uppercase(),
+                timestamp = parseDatabaseTimestampOrNull(row.createdAt) ?: 0L
+            )
+        }
             .sortedByDescending(PureFriendRequest::timestamp)
         persistRequests()
     }
@@ -182,7 +274,7 @@ private object IosChatStore {
                 else continuation.resume(result)
             }
         }
-        chats.value = snapshot?.documents.orEmpty().mapNotNull { raw ->
+        val firestoreChats = snapshot?.documents.orEmpty().mapNotNull { raw ->
             val doc = raw as? FIRDocumentSnapshot ?: return@mapNotNull null
             val data = doc.data()?.asStringMap().orEmpty()
             val chatId = data["chatId"].stringValue().ifBlank { doc.documentID }
@@ -196,10 +288,16 @@ private object IosChatStore {
                 }
             }
             val clearedAt = clearedChats[chatId] ?: 0L
-            val messages = messageSnapshot?.documents.orEmpty().mapNotNull { messageRaw ->
+            val firestoreMessages = messageSnapshot?.documents.orEmpty().mapNotNull { messageRaw ->
                 val messageDoc = messageRaw as? FIRDocumentSnapshot ?: return@mapNotNull null
                 messageDoc.data()?.asStringMap()?.toPureMessage(chatId, messageDoc.documentID)
-            }.filter { it.timestamp > clearedAt }.sortedBy(PureMessage::timestamp)
+            }.filter { it.timestamp > clearedAt }
+            // Keep messages delivered by the custom server even when the
+            // legacy Firestore collection has not been updated.
+            val messages = (messagesFlow(chatId).value + firestoreMessages)
+                .filter { it.timestamp > clearedAt }
+                .distinctBy(PureMessage::messageId)
+                .sortedBy(PureMessage::timestamp)
             updateChatMessages(chatId, messages)
 
             val profile = IosUserStore.cachedUser(friendUid) ?: IosUserStore.getUser(friendUid)
@@ -215,7 +313,15 @@ private object IosChatStore {
                 lastMessageTime = data["lastMessageTime"].longValue(),
                 unreadCount = messages.count { it.senderId != uid && it.timestamp > lastReadAt }
             )
-        }.sortedByDescending(PureChat::lastMessageTime)
+        }.let { fetched ->
+            // Firestore remains a compatibility source for old chats, but it
+            // must never erase a newer custom-server conversation.
+            (fetched + chats.value)
+                .groupBy(PureChat::chatId)
+                .values
+                .map { entries -> entries.maxByOrNull(PureChat::lastMessageTime)!! }
+                .sortedByDescending(PureChat::lastMessageTime)
+        }
         persistChats()
     }
 
@@ -320,91 +426,89 @@ private object IosChatStore {
     }
 
     suspend fun sendFriendRequest(email: String) {
-        val session = IosSessionStore.current() ?: throw Exception("Not logged in")
-        val snapshot = suspendCancellableCoroutine<FIRQuerySnapshot?> { continuation ->
-            IosFirestoreRefs.users.queryWhereField("email", isEqualTo = email.trim())
-                .queryLimitedTo(1u)
-                .getDocumentsWithCompletion { snapshot, error ->
-                    if (error != null) continuation.resumeWithException(Throwable(error.toString()))
-                    else continuation.resume(snapshot)
-                }
-        }
-        val targetDoc = snapshot?.documents?.firstOrNull() as? FIRDocumentSnapshot
+        val uid = currentUid() ?: throw Exception("Not logged in")
+        val client = SupabaseClientProvider.client
+        val target = client.from("profiles").select {
+            filter { eq("email", email.trim()) }
+            limit(1)
+        }.decodeList<IosBasicProfileRow>().firstOrNull()
             ?: throw Exception("Friend request failed: User with email '$email' not found.")
-        val targetUid = targetDoc.documentID
-        
-        if (targetUid == session.uid) {
+        val targetUid = target.id
+        if (targetUid == uid) {
             throw Exception("You cannot send a friend request to yourself.")
         }
-        if (friends.value.any { it.uid == targetUid }) {
+        val alreadyFriends = client.from("friendships").select {
+            filter { eq("user_id", uid); eq("friend_id", targetUid) }
+            limit(1)
+        }.decodeList<IosFriendshipRow>().isNotEmpty()
+        if (alreadyFriends) {
             throw Exception("You are already friends with this user.")
         }
-
-        val existingRequest = suspendCancellableCoroutine<FIRDocumentSnapshot?> { continuation ->
-            IosFirestoreRefs.userFriendRequests(targetUid).documentWithPath(session.uid)
-                .getDocumentWithCompletion { snapshot, error ->
-                    if (error != null) continuation.resumeWithException(Throwable(error.toString()))
-                    else continuation.resume(snapshot)
-                }
-        }
-        if (existingRequest?.exists() == true) {
+        val outgoing = client.from("friend_requests").select {
+            filter { eq("sender_id", uid); eq("receiver_id", targetUid); eq("status", "pending") }
+            limit(1)
+        }.decodeList<IosFriendRequestRow>().isNotEmpty()
+        if (outgoing) {
             throw Exception("A friend request has already been sent to this user.")
         }
-
-        val incomingRequest = suspendCancellableCoroutine<FIRDocumentSnapshot?> { continuation ->
-            IosFirestoreRefs.userFriendRequests(session.uid).documentWithPath(targetUid)
-                .getDocumentWithCompletion { snapshot, error ->
-                    if (error != null) continuation.resumeWithException(Throwable(error.toString()))
-                    else continuation.resume(snapshot)
-                }
-        }
-        if (incomingRequest?.exists() == true) {
+        val incoming = client.from("friend_requests").select {
+            filter { eq("sender_id", targetUid); eq("receiver_id", uid); eq("status", "pending") }
+            limit(1)
+        }.decodeList<IosFriendRequestRow>().isNotEmpty()
+        if (incoming) {
             throw Exception("This user already sent you a friend request. Please accept it from requests.")
         }
+        client.from("friend_requests").insert(IosFriendRequestInsert(uid, targetUid))
+        syncFriendsAndRequests(uid)
+    }
 
-        val me = IosUserStore.currentUser.value ?: IosUserStore.getUser(session.uid)
-        val payload = mapOf(
-            "senderUid" to session.uid,
-            "senderName" to (me?.name ?: session.email.substringBefore("@")),
-            "senderEmail" to session.email,
-            "status" to "PENDING",
-            "timestamp" to currentTimeMillis()
-        )
-        suspendCancellableCoroutine<Unit> { continuation ->
-            IosFirestoreRefs.userFriendRequests(targetUid).documentWithPath(session.uid)
-                .setData(payload as Map<Any?, *>) { error ->
-                    if (error != null) continuation.resumeWithException(Throwable(error.toString()))
-                    else continuation.resume(Unit)
+    suspend fun isFriend(otherUid: String): Boolean {
+        val uid = currentUid() ?: return false
+        return SupabaseClientProvider.client.from("friendships").select {
+            filter { eq("user_id", uid); eq("friend_id", otherUid) }
+            limit(1)
+        }.decodeList<IosFriendshipRow>().isNotEmpty()
+    }
+
+    suspend fun getChatRequestState(otherUid: String): IosChatRequestState? {
+        val uid = currentUid() ?: return null
+        val rows = SupabaseClientProvider.client.from("friend_requests").select {
+            filter {
+                or {
+                    and { eq("sender_id", uid); eq("receiver_id", otherUid) }
+                    and { eq("sender_id", otherUid); eq("receiver_id", uid) }
                 }
+            }
+            order("created_at", io.github.jan.supabase.postgrest.query.Order.DESCENDING)
+            limit(20)
+        }.decodeList<IosFriendRequestRow>()
+        val incoming = rows.firstOrNull { it.senderId == otherUid && it.receiverId == uid }
+        if (incoming != null && incoming.status.lowercase() in setOf("pending", "rejected")) {
+            return IosChatRequestState(incoming.status.lowercase(), incoming = true)
         }
+        val outgoing = rows.firstOrNull { it.senderId == uid && it.receiverId == otherUid }
+        if (outgoing != null && outgoing.status.lowercase() in setOf("pending", "rejected")) {
+            return IosChatRequestState(outgoing.status.lowercase(), incoming = false)
+        }
+        return null
     }
 
     suspend fun acceptFriendRequest(senderUid: String) {
         val uid = currentUid() ?: throw Exception("Not logged in")
-        val now = currentTimeMillis()
+        val client = SupabaseClientProvider.client
+        val request = client.from("friend_requests").select {
+            filter { eq("sender_id", senderUid); eq("receiver_id", uid); eq("status", "pending") }
+            limit(1)
+        }.decodeList<IosFriendRequestRow>().firstOrNull()
+            ?: throw Exception("Friend request is no longer pending")
         val newFriend = IosUserStore.cachedUser(senderUid) ?: IosUserStore.getUser(senderUid)
-        
-        suspendCancellableCoroutine<Unit> { continuation ->
-            IosFirestoreRefs.userFriends(uid).documentWithPath(senderUid)
-                .setData(mapOf("uid" to senderUid, "createdAt" to now) as Map<Any?, *>) { error ->
-                    if (error != null) continuation.resumeWithException(Throwable(error.toString()))
-                    else continuation.resume(Unit)
-                }
+        client.from("friend_requests").update({ set("status", "accepted") }) {
+            filter { eq("id", request.id) }
         }
-        suspendCancellableCoroutine<Unit> { continuation ->
-            IosFirestoreRefs.userFriends(senderUid).documentWithPath(uid)
-                .setData(mapOf("uid" to uid, "createdAt" to now) as Map<Any?, *>) { error ->
-                    if (error != null) continuation.resumeWithException(Throwable(error.toString()))
-                    else continuation.resume(Unit)
-                }
-        }
-        suspendCancellableCoroutine<Unit> { continuation ->
-            IosFirestoreRefs.userFriendRequests(uid).documentWithPath(senderUid)
-                .deleteDocumentWithCompletion { error ->
-                    if (error != null) continuation.resumeWithException(Throwable(error.toString()))
-                    else continuation.resume(Unit)
-                }
-        }
+        client.from("friendships").upsert(
+            listOf(IosFriendshipRow(uid, senderUid), IosFriendshipRow(senderUid, uid))
+        )
+        EventNotificationClient.dispatch("friend_request_accepted", request.id)
         friendRequests.value = friendRequests.value.filterNot {
             it.senderId == senderUid || it.requestId == senderUid
         }
@@ -418,13 +522,16 @@ private object IosChatStore {
 
     suspend fun rejectFriendRequest(senderUid: String) {
         val uid = currentUid() ?: throw Exception("Not logged in")
-        suspendCancellableCoroutine<Unit> { continuation ->
-            IosFirestoreRefs.userFriendRequests(uid).documentWithPath(senderUid)
-                .deleteDocumentWithCompletion { error ->
-                    if (error != null) continuation.resumeWithException(Throwable(error.toString()))
-                    else continuation.resume(Unit)
-                }
+        val client = SupabaseClientProvider.client
+        val request = client.from("friend_requests").select {
+            filter { eq("sender_id", senderUid); eq("receiver_id", uid); eq("status", "pending") }
+            limit(1)
+        }.decodeList<IosFriendRequestRow>().firstOrNull()
+            ?: return
+        client.from("friend_requests").update({ set("status", "rejected") }) {
+            filter { eq("id", request.id) }
         }
+        EventNotificationClient.dispatch("friend_request_rejected", request.id)
         friendRequests.value = friendRequests.value.filterNot {
             it.senderId == senderUid || it.requestId == senderUid
         }
@@ -434,19 +541,12 @@ private object IosChatStore {
 
     suspend fun unfriendUser(friendUid: String) {
         val uid = currentUid() ?: throw Exception("Not logged in")
-        suspendCancellableCoroutine<Unit> { continuation ->
-            IosFirestoreRefs.userFriends(uid).documentWithPath(friendUid)
-                .deleteDocumentWithCompletion { error ->
-                    if (error != null) continuation.resumeWithException(Throwable(error.toString()))
-                    else continuation.resume(Unit)
-                }
+        val client = SupabaseClientProvider.client
+        client.from("friendships").delete {
+            filter { eq("user_id", uid); eq("friend_id", friendUid) }
         }
-        suspendCancellableCoroutine<Unit> { continuation ->
-            IosFirestoreRefs.userFriends(friendUid).documentWithPath(uid)
-                .deleteDocumentWithCompletion { error ->
-                    if (error != null) continuation.resumeWithException(Throwable(error.toString()))
-                    else continuation.resume(Unit)
-                }
+        client.from("friendships").delete {
+            filter { eq("user_id", friendUid); eq("friend_id", uid) }
         }
         syncFriendsAndRequests(uid)
     }
@@ -713,8 +813,12 @@ private object IosChatStore {
 
     suspend fun sendMessage(chatId: String, content: String, friendUid: String, imageUrl: String? = null) {
         val uid = currentUid() ?: throw Exception("Not logged in")
-        val sender = IosUserStore.currentUser.value ?: IosUserStore.getUser(uid)
-        val messageId = "msg_${currentTimeMillis()}"
+        require(chatId == getChatId(uid, friendUid)) { "Invalid conversation" }
+        require(content.isNotBlank() || imageUrl != null) { "Message cannot be empty" }
+        require(content.encodeToByteArray().size <= 8000) { "Message is too long" }
+        // The custom server accepts UUID message ids only. NSUUID is available
+        // on every supported iOS version and matches Android's UUID contract.
+        val messageId = NSUUID().UUIDString.lowercase()
         val now = currentTimeMillis()
         val message = PureMessage(
             messageId = messageId,
@@ -738,60 +842,11 @@ private object IosChatStore {
             unreadCount = chats.value.firstOrNull { it.chatId == chatId }?.unreadCount ?: 0
         )
 
-        val payload = buildMap {
-            put("senderId", uid)
-            put("content", content)
-            put("timestamp", now)
-            put("type", if (imageUrl != null) "IMAGE" else "TEXT")
-            put("seen", false)
-            if (!imageUrl.isNullOrBlank()) put("imageUrl", imageUrl)
-        }
-        suspendCancellableCoroutine<Unit> { continuation ->
-            IosFirestoreRefs.chatMessages(chatId).documentWithPath(messageId)
-                .setData(payload as Map<Any?, *>) { error ->
-                    if (error != null) continuation.resumeWithException(Throwable(error.toString()))
-                    else continuation.resume(Unit)
-                }
-        }
-        
-        val lastMessageSummary = if (imageUrl != null) "Image" else content
-        val chatPayload = mapOf(
-            "lastMessage" to lastMessageSummary,
-            "lastMessageTime" to now,
-            "lastSenderUid" to uid
-        )
-        suspendCancellableCoroutine<Unit> { continuation ->
-            IosFirestoreRefs.userChats(uid).documentWithPath(chatId)
-                .updateData(chatPayload as Map<Any?, *>) { error ->
-                    if (error != null) continuation.resumeWithException(Throwable(error.toString()))
-                    else continuation.resume(Unit)
-                }
-        }
-        suspendCancellableCoroutine<Unit> { continuation ->
-            IosFirestoreRefs.userChats(friendUid).documentWithPath(chatId)
-                .updateData(chatPayload as Map<Any?, *>) { error ->
-                    if (error != null) continuation.resumeWithException(Throwable(error.toString()))
-                    else continuation.resume(Unit)
-                }
-        }
-        suspendCancellableCoroutine<Unit> { continuation ->
-            IosFirestoreRefs.notifications.documentWithPath(messageId)
-                .setData(
-                    mapOf(
-                        "type" to "DIRECT_MESSAGE",
-                        "chatId" to chatId,
-                        "senderId" to uid,
-                        "senderName" to (sender?.name ?: "Unknown"),
-                        "receiverId" to friendUid,
-                        "content" to content,
-                        "imageUrl" to imageUrl,
-                        "timestamp" to now
-                    ) as Map<Any?, *>
-                ) { error ->
-                    if (error != null) continuation.resumeWithException(Throwable(error.toString()))
-                    else continuation.resume(Unit)
-                }
-        }
+        // Delivery, retry, authorization and push notification are owned by
+        // the authenticated custom server. The local optimistic copy remains
+        // visible while the socket is reconnecting.
+        if (customChat == null) startSync()
+        customChat?.sendMessage(messageId, friendUid, content, now, imageUrl)
     }
 
     suspend fun sendGroupMessage(groupId: String, content: String, imageUrl: String? = null) {
@@ -1465,6 +1520,11 @@ class IosChatRepository : IChatRepository {
     suspend fun sendMessage(chatId: String, content: String, friendUid: String, imageUrl: String? = null) {
         IosChatStore.sendMessage(chatId, content, friendUid, imageUrl)
     }
+
+    suspend fun isFriend(otherUid: String): Boolean = IosChatStore.isFriend(otherUid)
+
+    suspend fun getChatRequestState(otherUid: String): IosChatRequestState? =
+        IosChatStore.getChatRequestState(otherUid)
 
     suspend fun sendGroupMessage(groupId: String, content: String, imageUrl: String? = null) {
         IosChatStore.sendGroupMessage(groupId, content, imageUrl)
