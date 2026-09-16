@@ -188,6 +188,16 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    fun refreshFriendDataNow() {
+        viewModelScope.launch {
+            runCatching { chatRepository.refreshFriendRequestsNow(forceRefresh = true) }
+                .onFailure { Log.w("MainViewModel", "Friend request refresh failed", it) }
+            _friends.value = runCatching {
+                chatRepository.getFriendsImplementation(forceRefresh = true)
+            }.getOrDefault(_friends.value)
+        }
+    }
+
     fun addFriendLocally(friend: UserEntity) {
         _friends.update { existing ->
             (existing.filterNot { it.uid == friend.uid } + friend)

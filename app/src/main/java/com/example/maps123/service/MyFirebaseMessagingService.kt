@@ -96,7 +96,8 @@ class MyFirebaseMessagingService : FirebaseMessagingService() {
             CampusUpdateBus.publish(
                 CampusUpdateEvent(
                     key = "${data["kind"]}:${data["requestId"]}",
-                    message = notificationTitle(remoteMessage, "Friend update")
+                    message = notificationTitle(remoteMessage, "Friend update"),
+                    refreshFriends = true
                 )
             )
             showCampusNotification(

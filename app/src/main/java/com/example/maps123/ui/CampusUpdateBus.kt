@@ -6,7 +6,8 @@ import kotlinx.coroutines.flow.asSharedFlow
 data class CampusUpdateEvent(
     val key: String,
     val message: String,
-    val postId: String? = null
+    val postId: String? = null,
+    val refreshFriends: Boolean = false
 )
 
 /** Delivers transient updates above every app screen and deduplicates FCM/poll overlap. */

@@ -65,6 +65,7 @@ fun RootNavigation(
 
     LaunchedEffect(navController) {
         CampusUpdateBus.events.collect { event ->
+            if (event.refreshFriends) viewModel.refreshFriendDataNow()
             val result = updateSnackbar.showSnackbar(
                 message = event.message,
                 actionLabel = event.postId?.let { "View" },
