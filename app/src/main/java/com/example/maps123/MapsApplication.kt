@@ -4,6 +4,7 @@ import android.app.Application
 import com.google.firebase.FirebaseApp
 import com.example.maps123.data.local.RoutePreloader
 import com.example.maps123.data.local.PlacePreloader
+import com.example.maps123.data.supabase.PasswordRecoveryManager
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -13,6 +14,8 @@ class MapsApplication : Application() {
     private val appScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     override fun onCreate() {
         super.onCreate()
+
+        PasswordRecoveryManager.initialize(this)
 
         FirebaseApp.initializeApp(this)
         com.example.shared.data.PlatformDiskCache.init(this)

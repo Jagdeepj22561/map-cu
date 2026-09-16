@@ -110,7 +110,7 @@ object AuthRepository {
                 withTimeout(AUTH_REQUEST_TIMEOUT_MS) {
                     SupabaseProvider.client.auth.resetPasswordForEmail(
                         email = email.trim(),
-                        redirectUrl = "maps123://auth"
+                        redirectUrl = "https://campus-map-backend-fpz8.onrender.com/auth/callback"
                     )
                 }
                 Result.success(Unit)

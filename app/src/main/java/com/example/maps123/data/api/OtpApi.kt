@@ -46,8 +46,6 @@ interface OtpApi {
 object ApiClient {
 
     private const val BASE_URL = "https://campus-map-backend-fpz8.onrender.com/"
-    private const val API_KEY = "super_secret_key_here"
-
     /**
      * Render endpoints no longer use a static API key embedded in the APK.
      * Authenticated requests carry the current Supabase access token instead.
@@ -56,7 +54,6 @@ object ApiClient {
     private val interceptor = Interceptor { chain ->
         val requestBuilder = chain.request().newBuilder()
             .addHeader("Accept", "application/json")
-            .addHeader("x-api-key", API_KEY)
 
         SupabaseProvider.client.auth.currentSessionOrNull()?.accessToken?.let { token ->
             requestBuilder.addHeader("Authorization", "Bearer $token")

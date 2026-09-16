@@ -12,6 +12,7 @@ import com.example.maps123.data.local.AppDatabase
 import com.example.maps123.data.repository.AuthRepository
 import com.example.maps123.data.session.SessionManager
 import com.example.maps123.data.supabase.PasswordRecoveryManager
+import com.example.maps123.data.firebase.FcmTokenSyncManager
 import com.example.maps123.ui.MainViewModel
 import com.example.maps123.ui.screens.HomeScreen
 import com.example.maps123.ui.screens.LoginScreen
@@ -190,6 +191,7 @@ fun RootNavigation(
                 viewModel.resetChatSession()
                 AppDatabase.clearInstance()
                 viewModel.initializeChat()
+                FcmTokenSyncManager.syncCurrentToken(context)
                 navController.navigate("home") {
                     popUpTo("login") { inclusive = true }
                 }

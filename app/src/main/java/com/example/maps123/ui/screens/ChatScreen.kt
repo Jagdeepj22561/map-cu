@@ -302,10 +302,6 @@ fun ChatScreen(
         onMessagePrivately = { senderUid, senderName ->
             scope.launch {
                 runCatching {
-                    if (!chatRepository.isFriend(senderUid)) {
-                        Toast.makeText(context, "Add this user as a friend first to message them", Toast.LENGTH_SHORT).show()
-                        return@launch
-                    }
                     val chatId = chatRepository.createChatForFriend(senderUid, senderName)
                     val profile = chatRepository.lookupUser(senderUid)
                     onMessagePrivately(

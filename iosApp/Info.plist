@@ -41,12 +41,6 @@
 	<key>UILaunchStoryboardName</key>
 	<string>LaunchScreen</string>
 
-	<key>NSAppTransportSecurity</key>
-	<dict>
-		<key>NSAllowsArbitraryLoads</key>
-		<true/>
-	</dict>
-
 	<key>NSLocationWhenInUseUsageDescription</key>
 	<string>CU Connect uses your location to show your position on the campus map and support navigation features.</string>
 

@@ -157,12 +157,8 @@ fun AnnouncementsScreen(
         }
         scope.launch {
             try {
-                if (!chatRepository.isFriend(authorUid)) {
-                    Toast.makeText(context, "Add this user as a friend first to message them", Toast.LENGTH_SHORT).show()
-                    return@launch
-                }
                 chatRepository.createChatForFriend(authorUid, announcement.author.ifBlank { "User" })
-                Toast.makeText(context, "Private chat added in Chats", Toast.LENGTH_SHORT).show()
+                Toast.makeText(context, "Chat opened — one message is allowed until accepted", Toast.LENGTH_SHORT).show()
             } catch (e: Exception) {
                 Toast.makeText(context, e.message ?: "Failed to open chat", Toast.LENGTH_SHORT).show()
             }

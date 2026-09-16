@@ -30,7 +30,6 @@ import kotlin.coroutines.resumeWithException
 
 internal object IosPlatformConfig {
     const val backendBaseUrl = "https://campus-map-backend-fpz8.onrender.com"
-    const val backendApiKey = "super_secret_key_here"
     val supabaseUrl: String
         get() = (NSBundle.mainBundle.objectForInfoDictionaryKey("SUPABASE_URL") as? String).orEmpty().trimEnd('/')
     val supabasePublishableKey: String
@@ -467,7 +466,7 @@ internal object IosAuthApi {
             urlString = "${IosPlatformConfig.supabaseUrl}/auth/v1/recover",
             method = "POST",
             headers = supabaseHeaders(),
-            body = mapOf("email" to email.trim(), "redirect_to" to "maps123://auth")
+            body = mapOf("email" to email.trim(), "redirect_to" to "https://campus-map-backend-fpz8.onrender.com/auth/callback")
         )
         ensureSuccess(response)
     }
@@ -507,8 +506,7 @@ internal object IosAuthApi {
     }
 
     private fun backendHeaders(): Map<String, String> = mapOf(
-        "Accept" to "application/json",
-        "X-API-Key" to IosPlatformConfig.backendApiKey
+        "Accept" to "application/json"
     )
 
     private fun supabaseHeaders(): Map<String, String> = mapOf(

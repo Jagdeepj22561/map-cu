@@ -92,10 +92,10 @@ class MainActivity : ComponentActivity() {
     override fun onStart() {
         super.onStart()
         Log.d("DEBUG_MAIN", "onStart CALLED")
-        if (AuthRepository.currentUserId() != null) {
+        if (AuthRepository.currentUserId() != null && !PasswordRecoveryManager.isPasswordUpdateRequiredNow()) {
             updateFcmToken()
+            viewModel.resumeRealtimeSync()
         }
-        viewModel.resumeRealtimeSync()
     }
 
     override fun onStop() {
@@ -119,9 +119,11 @@ class MainActivity : ComponentActivity() {
                 runOnUiThread {
                     if (it.type.equals("recovery", ignoreCase = true)) {
                         PasswordRecoveryManager.requirePasswordUpdate()
+                        viewModel.pauseRealtimeSync()
+                    } else {
+                        updateFcmToken()
+                        viewModel.initializeChat()
                     }
-                    updateFcmToken()
-                    viewModel.initializeChat()
                 }
             },
             onError = { error -> Log.e("SupabaseAuth", "Deep-link authentication failed", error) }

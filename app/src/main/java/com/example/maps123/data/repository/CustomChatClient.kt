@@ -98,7 +98,10 @@ class CustomChatClient(private val context: Context) {
                         }
                         "error" -> {
                             if (!event.isNull("id") && !event.optBoolean("retryable", true)) {
-                                dao.markCustomFailure(event.getString("id"), "Not sent (access denied)")
+                                dao.markCustomFailure(
+                                    event.getString("id"),
+                                    event.optString("message", "Not sent (access denied)")
+                                )
                                 inflight.remove(event.getString("id"))
                             } else {
                                 // A transient database/network failure preserves pending state.
