@@ -105,11 +105,13 @@ dependencies {
     implementation(libs.androidx.lifecycle.runtime.ktx)
     implementation(libs.androidx.activity.compose)
     implementation(platform(libs.androidx.compose.bom))
+    testImplementation(platform(libs.androidx.compose.bom))
     implementation(libs.androidx.ui)
     implementation(libs.androidx.ui.graphics)
     implementation(libs.androidx.ui.tooling.preview)
     implementation(libs.androidx.material3)
-    implementation("androidx.compose.material:material-icons-extended:1.7.6")
+    // The BOM owns the Compose version; do not pin icons independently.
+    implementation("androidx.compose.material:material-icons-extended")
     implementation("io.coil-kt:coil-compose:2.5.0")
     implementation("androidx.datastore:datastore-preferences:1.0.0")
     // Keep runtime and instrumentation-test classpaths on the same AndroidX
@@ -126,7 +128,6 @@ dependencies {
     // Firebase Messaging is retained only to receive push notifications.
     implementation(platform("com.google.firebase:firebase-bom:33.7.0"))
     implementation("com.google.firebase:firebase-messaging")
-    implementation(libs.ui)
 
     // Room
     val roomVersion = "2.8.4"
