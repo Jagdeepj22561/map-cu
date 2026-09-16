@@ -8,6 +8,7 @@ import com.example.maps123.data.local.AppDatabase
 import com.example.maps123.data.local.ChatEntity
 import com.example.maps123.data.local.MessageEntity
 import com.example.maps123.data.supabase.SupabaseProvider
+import com.example.shared.data.AuthSessionManager
 import com.example.shared.repository.parseDatabaseTimestampOrNull
 import io.github.jan.supabase.auth.auth
 import kotlinx.coroutines.*
@@ -28,6 +29,11 @@ class CustomChatClient(private val context: Context) {
             var backoff = 1000L
             while (isActive) {
                 try {
+                    SupabaseProvider.client.auth.awaitInitialization()
+                    if (SupabaseProvider.client.auth.currentUserOrNull() == null) {
+                        delay(5000L)
+                        continue
+                    }
                     connect()
                     backoff = 1000L
                 } catch (cancelled: CancellationException) {
@@ -48,10 +54,8 @@ class CustomChatClient(private val context: Context) {
     private suspend fun connect() = coroutineScope {
         val url = BuildConfig.CUSTOM_CHAT_SERVER_URL
         require(url.startsWith("wss://")) { "Custom chat requires a wss:// URL" }
-        val auth = SupabaseProvider.client.auth
-        auth.awaitInitialization()
-        val owner = auth.currentUserOrNull()?.id ?: error("No session")
-        val token = auth.currentSessionOrNull()?.accessToken ?: error("No token")
+        val token = AuthSessionManager.requireAccessToken()
+        val owner = SupabaseProvider.client.auth.currentUserOrNull()?.id ?: error("No session")
         // Capture this user's database; never resolve a new user's DAO in callbacks.
         val db = AppDatabase.getInstance(context.applicationContext)
         val dao = db.chatDao()

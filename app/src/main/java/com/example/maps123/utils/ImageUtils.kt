@@ -5,6 +5,7 @@ import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.net.Uri
 import com.example.maps123.data.api.ApiClient
+import com.example.shared.data.AuthSessionManager
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.MultipartBody
 import okhttp3.RequestBody.Companion.asRequestBody
@@ -56,6 +57,9 @@ object ImageUtils {
 
     // 🔥 FINAL FIXED UPLOAD FUNCTION
     suspend fun uploadImage(file: File): String {
+        // Retrofit interceptors are synchronous; refresh before entering the
+        // upload call so an expired bearer token is never attached.
+        AuthSessionManager.requireAccessToken()
         val requestFile = file
             .asRequestBody("image/*".toMediaType())
 

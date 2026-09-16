@@ -14,7 +14,12 @@ object SupabaseClientProvider {
             supabaseUrl = SupabaseConfig.url,
             supabaseKey = SupabaseConfig.publishableKey
         ) {
-            install(Auth)
+            install(Auth) {
+                // Keep the SDK refresher running for the entire app lifetime.
+                // Individual requests still use AuthSessionManager so they wait
+                // for an in-flight refresh instead of sending an expired JWT.
+                alwaysAutoRefresh = true
+            }
             install(Postgrest)
             install(Realtime)
         }

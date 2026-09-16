@@ -16,6 +16,7 @@ import com.example.shared.Route
 import com.example.shared.RoutesData
 import com.example.shared.campusPlaces
 import com.example.shared.data.SupabaseClientProvider
+import com.example.shared.data.AuthSessionManager
 import io.github.jan.supabase.auth.auth
 import kotlinx.cinterop.ExperimentalForeignApi
 import kotlinx.cinterop.ObjCObjectVar
@@ -431,6 +432,7 @@ internal object IosAuthApi {
         val auth = SupabaseClientProvider.client.auth
         auth.awaitInitialization()
         val storedSession = IosSessionStore.current()
+        AuthSessionManager.accessTokenOrNull()
         val sharedSession = auth.currentSessionOrNull()
         if (sharedSession != null) {
             IosSessionStore.save(
@@ -531,9 +533,8 @@ internal object IosAuthApi {
 
 /** Minimal PostgREST client so iOS does not need Firebase for profile data. */
 internal object IosSupabase {
-    private fun headers(extra: Map<String, String> = emptyMap()): Map<String, String> {
-        val accessToken = SupabaseClientProvider.client.auth.currentAccessTokenOrNull()
-            ?: IosSessionStore.current()?.idToken
+    private suspend fun headers(extra: Map<String, String> = emptyMap()): Map<String, String> {
+        val accessToken = AuthSessionManager.accessTokenOrNull()
         return buildMap {
             put("apikey", IosPlatformConfig.supabasePublishableKey)
             put("Accept", "application/json")

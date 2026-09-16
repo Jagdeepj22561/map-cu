@@ -27,9 +27,7 @@ object EventNotificationClient {
     suspend fun dispatch(kind: String, resourceId: String): Boolean {
         val baseUrl = NotificationBackendConfig.url.trimEnd('/')
         if (baseUrl.isBlank() || resourceId.isBlank()) return false
-        val auth = SupabaseClientProvider.client.auth
-        auth.awaitInitialization()
-        val accessToken = auth.currentSessionOrNull()?.accessToken ?: return false
+        val accessToken = AuthSessionManager.accessTokenOrNull() ?: return false
 
         repeat(MAX_ATTEMPTS) { attempt ->
             try {
@@ -60,9 +58,7 @@ object EventNotificationClient {
     suspend fun registerDeviceToken(token: String, platform: String): Boolean {
         val baseUrl = NotificationBackendConfig.url.trimEnd('/')
         if (baseUrl.isBlank() || token.isBlank()) return false
-        val auth = SupabaseClientProvider.client.auth
-        auth.awaitInitialization()
-        val accessToken = auth.currentSessionOrNull()?.accessToken ?: return false
+        val accessToken = AuthSessionManager.accessTokenOrNull() ?: return false
         repeat(MAX_ATTEMPTS) { attempt ->
             try {
                 val response = httpClient.post("$baseUrl/notifications/device-token") {
@@ -92,9 +88,7 @@ object EventNotificationClient {
     suspend fun deleteOwnAnnouncementComment(commentId: String) {
         val baseUrl = NotificationBackendConfig.url.trimEnd('/')
         require(baseUrl.isNotBlank()) { "Backend URL is unavailable" }
-        val auth = SupabaseClientProvider.client.auth
-        auth.awaitInitialization()
-        val accessToken = auth.currentSessionOrNull()?.accessToken
+        val accessToken = AuthSessionManager.accessTokenOrNull()
             ?: error("Login required")
         val response = httpClient.delete("$baseUrl/announcements/comments/$commentId") {
             header(HttpHeaders.Authorization, "Bearer $accessToken")
