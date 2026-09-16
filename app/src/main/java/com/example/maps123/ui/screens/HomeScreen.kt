@@ -763,7 +763,12 @@ fun HomeScreen(
                                                     chatRepository?.updateGhostMode(it)
                                                 }
                                             },
-                                            onProfileClick = { currentScreen = PureAppScreen.PROFILE },
+                                            onProfileClick = {
+                                                // Preserve the real hierarchy so Profile's
+                                                // toolbar Back returns to Settings.
+                                                previousScreen = PureAppScreen.SETTINGS
+                                                currentScreen = PureAppScreen.PROFILE
+                                            },
                                             onLogout = onLogout,
                                             onBack = { currentScreen = previousScreen }
                                         )

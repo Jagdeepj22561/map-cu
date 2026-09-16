@@ -167,8 +167,10 @@ internal fun HomeRoute(
     val announcements by announcementRepository.getAnnouncementsFlow().collectAsState(initial = emptyList())
     val liveLocation by IosLocationService.location.collectAsState(initial = null)
 
-    var currentScreen by remember { mutableStateOf(PureAppScreen.CHAT) }
-    var previousScreen by remember { mutableStateOf(PureAppScreen.CHAT) }
+    // Keep iOS on the same root destination as Android. Detail routes retain
+    // their predecessor explicitly so toolbar Back follows the actual flow.
+    var currentScreen by remember { mutableStateOf(PureAppScreen.MAP) }
+    var previousScreen by remember { mutableStateOf(PureAppScreen.MAP) }
     var searchQuery by remember { mutableStateOf("") }
     var isSearching by remember { mutableStateOf(false) }
     var isFilterDockVisible by remember { mutableStateOf(false) }
@@ -179,6 +181,7 @@ internal fun HomeRoute(
 
     var selectedChat by remember { mutableStateOf<PureChat?>(null) }
     var selectedAnnouncementId by remember { mutableStateOf<String?>(null) }
+    var announcementReturnScreen by remember { mutableStateOf(PureAppScreen.ANNOUNCEMENTS) }
     var selectedFriendUid by remember { mutableStateOf<String?>(null) }
     var friendProfile by remember { mutableStateOf<IosUserProfile?>(null) }
     var chatToDelete by remember { mutableStateOf<PureChat?>(null) }
@@ -545,6 +548,7 @@ internal fun HomeRoute(
             onProfileClick = { uid ->
                 selectedFriendUid = uid
                 showFriendManager = false
+                previousScreen = PureAppScreen.CHAT
                 currentScreen = PureAppScreen.FRIEND_PROFILE
             },
             renderImage = { url, modifier, scale ->
@@ -737,6 +741,7 @@ internal fun HomeRoute(
                                         onBack = { selectedChat = null },
                                         onProfileClick = { uid ->
                                             selectedFriendUid = uid
+                                            previousScreen = PureAppScreen.CHAT
                                             currentScreen = PureAppScreen.FRIEND_PROFILE
                                         }
                                     )
@@ -802,7 +807,10 @@ internal fun HomeRoute(
                                         announcementId = selectedAnnouncementId!!,
                                         repository = announcementRepository,
                                         currentUser = currentUser,
-                                        onBack = { selectedAnnouncementId = null }
+                                        onBack = {
+                                            selectedAnnouncementId = null
+                                            currentScreen = announcementReturnScreen
+                                        }
                                     )
                                 } else {
                                     val filteredAnnouncements = announcements.filter {
@@ -826,6 +834,7 @@ internal fun HomeRoute(
                                             currentUser = currentUser?.toPureUser(),
                                             onAnnouncementClick = { announcementId ->
                                                 selectedAnnouncementId = announcementId
+                                                announcementReturnScreen = PureAppScreen.ANNOUNCEMENTS
                                             },
                                             onCreatePostClick = {
                                                 showCreatePostDialog = true
@@ -845,7 +854,9 @@ internal fun HomeRoute(
                                             renderImage = { url, modifier, scale ->
                                                 IosRemoteImage(url, modifier, scale)
                                             },
-                                            currentUid = currentUser?.uid
+                                            currentUid = currentUser?.uid,
+                                            searchQuery = searchQuery,
+                                            onSearchQueryChange = { searchQuery = it }
                                         )
                                     }
                                 }
@@ -877,7 +888,10 @@ internal fun HomeRoute(
                                                     .onFailure { errorMessage = it.message ?: "Failed to update ghost mode" }
                                             }
                                         },
-                                        onProfileClick = { currentScreen = PureAppScreen.PROFILE },
+                                        onProfileClick = {
+                                            previousScreen = PureAppScreen.SETTINGS
+                                            currentScreen = PureAppScreen.PROFILE
+                                        },
                                         onOpenDebugLog = {
                                             IosInAppDebugLogStore.log("Opened debug log screen")
                                             showDebugLog = true
@@ -910,6 +924,7 @@ internal fun HomeRoute(
                                     onBack = { currentScreen = previousScreen },
                                     onOpenPost = { postId ->
                                         selectedAnnouncementId = postId
+                                        announcementReturnScreen = PureAppScreen.PROFILE
                                         currentScreen = PureAppScreen.ANNOUNCEMENTS
                                     },
                                     onProfileSaved = {}
@@ -923,9 +938,10 @@ internal fun HomeRoute(
                                         currentUserUid = currentUser?.uid,
                                         announcements = announcements,
                                         readOnly = profile.uid != (currentUser?.uid ?: ""),
-                                        onBack = { currentScreen = PureAppScreen.CHAT },
+                                        onBack = { currentScreen = previousScreen },
                                         onOpenPost = { postId ->
                                             selectedAnnouncementId = postId
+                                            announcementReturnScreen = PureAppScreen.FRIEND_PROFILE
                                             currentScreen = PureAppScreen.ANNOUNCEMENTS
                                         },
                                         onProfileSaved = {}
@@ -1129,8 +1145,9 @@ internal fun IosMapKitView(
 
             val activeRoute = latestActiveRoute
             if (latestIsNavigating && activeRoute != null) {
+                val remainingPoints = remainingRoutePoints(latestLocation, activeRoute)
                 val path = GMSMutablePath()
-                activeRoute.points.forEach { point ->
+                remainingPoints.forEach { point ->
                     path.addLatitude(point.lat, longitude = point.lng)
                 }
                 val polyline = GMSPolyline()
