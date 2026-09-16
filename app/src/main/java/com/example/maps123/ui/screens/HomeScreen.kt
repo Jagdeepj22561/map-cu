@@ -7,6 +7,7 @@ import android.Manifest
 import android.content.pm.PackageManager
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.compose.BackHandler
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -18,6 +19,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -90,6 +92,17 @@ private fun formatFriendRequestError(message: String?): String {
         else -> text
     }
 }
+
+private data class HomeNavigationSnapshot(
+    val screen: PureAppScreen,
+    val chatId: String?,
+    val friendUid: String?,
+    val friendName: String?,
+    val friendPicUrl: String?,
+    val announcementId: String?,
+    val announcementTab: Int,
+    val openedFromChat: Boolean
+)
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -216,6 +229,72 @@ fun HomeScreen(
     var selectedFriendUid by rememberSaveable { mutableStateOf<String?>(null) }
     var selectedFriendName by rememberSaveable { mutableStateOf<String?>(null) }
     var selectedFriendPicUrl by rememberSaveable { mutableStateOf<String?>(null) }
+    val navigationBackStack = remember { mutableStateListOf<HomeNavigationSnapshot>() }
+    var lastNavigationSnapshot by remember { mutableStateOf<HomeNavigationSnapshot?>(null) }
+    val navigationSnapshot = HomeNavigationSnapshot(
+        screen = currentScreen,
+        chatId = selectedChatId,
+        friendUid = selectedFriendUid,
+        friendName = selectedFriendName,
+        friendPicUrl = selectedFriendPicUrl,
+        announcementId = selectedAnnouncementId,
+        announcementTab = selectedAnnouncementInitialTab,
+        openedFromChat = announcementOpenedFromChat
+    )
+
+    // Record every route/detail transition. A snapshot stack is used instead
+    // of a single previousScreen so system Back can unwind A -> B -> C.
+    LaunchedEffect(navigationSnapshot) {
+        val previous = lastNavigationSnapshot
+        if (previous == null) {
+            lastNavigationSnapshot = navigationSnapshot
+        } else if (previous != navigationSnapshot) {
+            if (navigationBackStack.lastOrNull() == navigationSnapshot) {
+                // A screen's own toolbar Back navigated to the top stack entry.
+                navigationBackStack.removeAt(navigationBackStack.lastIndex)
+            } else {
+                navigationBackStack.add(previous)
+            }
+            lastNavigationSnapshot = navigationSnapshot
+        }
+    }
+
+    BackHandler(enabled = navigationBackStack.isNotEmpty() || navigationSnapshot.screen != PureAppScreen.MAP || navigationSnapshot.chatId != null || navigationSnapshot.announcementId != null) {
+        val target = navigationBackStack.removeLastOrNull()
+        if (target == null) {
+            // The root screen has no previous state; leaving the activity here
+            // deliberately preserves Android's normal app-exit behavior.
+            lastNavigationSnapshot = HomeNavigationSnapshot(
+                screen = PureAppScreen.MAP,
+                chatId = null,
+                friendUid = null,
+                friendName = null,
+                friendPicUrl = null,
+                announcementId = null,
+                announcementTab = 0,
+                openedFromChat = false
+            )
+            currentScreen = PureAppScreen.MAP
+            selectedChatId = null
+            selectedFriendUid = null
+            selectedFriendName = null
+            selectedFriendPicUrl = null
+            selectedAnnouncementId = null
+            announcementOpenedFromChat = false
+        } else {
+            // Mark the restored state before assigning fields so the observer
+            // does not record the back operation as a new forward navigation.
+            lastNavigationSnapshot = target
+            currentScreen = target.screen
+            selectedChatId = target.chatId
+            selectedFriendUid = target.friendUid
+            selectedFriendName = target.friendName
+            selectedFriendPicUrl = target.friendPicUrl
+            selectedAnnouncementId = target.announcementId
+            selectedAnnouncementInitialTab = target.announcementTab
+            announcementOpenedFromChat = target.openedFromChat
+        }
+    }
     val localChats by chatRepository.allChats.collectAsState(initial = emptyList())
 
     // The notification can open Android before the socket has drained the
