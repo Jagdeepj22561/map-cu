@@ -470,7 +470,8 @@ class ChatRepository(private val context: Context) : IChatRepository {
                         and { eq("sender_id", otherUid); eq("receiver_id", mine) }
                     }
                 }
-                limit(2)
+                order("created_at", Order.DESCENDING)
+                limit(20)
             }
             .decodeList<FriendRequestRow>()
 
