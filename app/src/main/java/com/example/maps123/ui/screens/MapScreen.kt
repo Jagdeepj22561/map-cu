@@ -235,11 +235,20 @@ fun MapScreen(
                 }
 
                 if (uiState.isNavigating && uiState.activeRoute != null) {
-                    Polyline(
-                        points = uiState.activeRoute.points.map { it.toLatLng() },
-                        color = MaterialTheme.colorScheme.primary,
-                        width = 12f
-                    )
+                    uiState.activeRoute?.let { route ->
+                        val fromIndex = uiState.nearestIndex.coerceIn(0, route.points.lastIndex)
+                        val remainingPoints = route.points
+                            .subList(fromIndex, route.points.size)
+                            .map { it.toLatLng() }
+                        Polyline(
+                            // Only draw the route still ahead of the user. Since
+                            // nearestIndex can move in either direction, backing
+                            // up naturally restores the removed section.
+                            points = remainingPoints,
+                            color = MaterialTheme.colorScheme.primary,
+                            width = 12f
+                        )
+                    }
                 }
             }
         },

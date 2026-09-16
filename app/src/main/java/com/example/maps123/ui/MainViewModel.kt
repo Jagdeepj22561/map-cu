@@ -269,14 +269,18 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         route: Route,
         currentNearestIndex: Int
     ) {
+        // Search around the current position in both directions. Restricting
+        // this to forward points made the route unable to restore when the
+        // user moved backwards.
         val searchRadius = 10
+        val start = (currentNearestIndex - searchRadius).coerceAtLeast(0)
         val end = (currentNearestIndex + searchRadius)
             .coerceAtMost(route.points.size - 1)
 
         var bestIndex = currentNearestIndex
         var minDist = Double.MAX_VALUE
 
-        for (i in currentNearestIndex..end) {
+        for (i in start..end) {
             val p = route.points[i]
             val d = GeoUtils.distanceMeters(loc.toGeoPoint(), p)
             if (d < minDist) {
