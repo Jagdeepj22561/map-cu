@@ -27,7 +27,9 @@ object EventNotificationClient {
     suspend fun dispatch(kind: String, resourceId: String): Boolean {
         val baseUrl = NotificationBackendConfig.url.trimEnd('/')
         if (baseUrl.isBlank() || resourceId.isBlank()) return false
-        val accessToken = SupabaseClientProvider.client.auth.currentSessionOrNull()?.accessToken ?: return false
+        val auth = SupabaseClientProvider.client.auth
+        auth.awaitInitialization()
+        val accessToken = auth.currentSessionOrNull()?.accessToken ?: return false
 
         repeat(MAX_ATTEMPTS) { attempt ->
             try {
@@ -51,6 +53,38 @@ object EventNotificationClient {
     }
 
     /**
+     * Registers through Render instead of writing the token table directly.
+     * The authenticated endpoint can safely repair a missing row or move a
+     * device token to the account currently signed in on that device.
+     */
+    suspend fun registerDeviceToken(token: String, platform: String): Boolean {
+        val baseUrl = NotificationBackendConfig.url.trimEnd('/')
+        if (baseUrl.isBlank() || token.isBlank()) return false
+        val auth = SupabaseClientProvider.client.auth
+        auth.awaitInitialization()
+        val accessToken = auth.currentSessionOrNull()?.accessToken ?: return false
+        repeat(MAX_ATTEMPTS) { attempt ->
+            try {
+                val response = httpClient.post("$baseUrl/notifications/device-token") {
+                    header(HttpHeaders.Authorization, "Bearer $accessToken")
+                    contentType(ContentType.Application.Json)
+                    setBody(buildJsonObject {
+                        put("token", token)
+                        put("platform", platform)
+                    }.toString())
+                }
+                if (response.status.value in 200..299) return true
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Throwable) {
+                // Retry Render cold starts and transient network failures.
+            }
+            if (attempt < MAX_ATTEMPTS - 1) delay(RETRY_DELAY_MS * (attempt + 1))
+        }
+        return false
+    }
+
+    /**
      * Temporary authenticated backend path for projects where the original
      * comment table was deployed without an owner-delete RLS policy. The
      * backend verifies the JWT and author before its service-role delete.
@@ -58,7 +92,9 @@ object EventNotificationClient {
     suspend fun deleteOwnAnnouncementComment(commentId: String) {
         val baseUrl = NotificationBackendConfig.url.trimEnd('/')
         require(baseUrl.isNotBlank()) { "Backend URL is unavailable" }
-        val accessToken = SupabaseClientProvider.client.auth.currentSessionOrNull()?.accessToken
+        val auth = SupabaseClientProvider.client.auth
+        auth.awaitInitialization()
+        val accessToken = auth.currentSessionOrNull()?.accessToken
             ?: error("Login required")
         val response = httpClient.delete("$baseUrl/announcements/comments/$commentId") {
             header(HttpHeaders.Authorization, "Bearer $accessToken")

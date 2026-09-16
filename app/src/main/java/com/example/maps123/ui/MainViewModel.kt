@@ -29,6 +29,7 @@ import kotlin.math.max
 import com.example.maps123.data.repository.ChatRepository
 import com.example.maps123.data.repository.AnnouncementRepository
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.flow.collect
 
 class MainViewModel(application: Application) : AndroidViewModel(application) {
 
@@ -45,6 +46,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val smartController = SmartInstructionController()
     
     private var userSessionJob: Job? = null
+    private var announcementWatchJob: Job? = null
     private var isChatInitialized = false
 
     init {
@@ -80,6 +82,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     return@launch
                 }
                 com.example.maps123.data.firebase.FcmTokenSyncManager.syncCurrentToken(getApplication())
+                startAnnouncementWatch(auth.currentUserOrNull()?.id.orEmpty())
                 Log.d("DEBUG_VM", "startSync CALLED")
                 chatRepository.startSync()
                 _friends.value = runCatching {
@@ -113,6 +116,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         userSessionJob?.cancel()
         userSessionJob = null
         isChatInitialized = false
+        announcementWatchJob?.cancel()
+        announcementWatchJob = null
         _friends.value = emptyList()
         chatRepository.clearAllListeners()
         _uiState.update {
@@ -126,11 +131,53 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun pauseRealtimeSync() {
         chatRepository.clearAllListeners()
+        announcementWatchJob?.cancel()
+        announcementWatchJob = null
+        announcementRepository.stopSync()
         isChatInitialized = false
     }
 
     fun resumeRealtimeSync() {
         initializeChat()
+    }
+
+    /**
+     * Keeps the 20-post Room window current while the app is foregrounded,
+     * regardless of whether Map, Chat, News, or another screen is visible.
+     * FCM remains responsible when the process is backgrounded.
+     */
+    private fun startAnnouncementWatch(currentUid: String) {
+        if (currentUid.isBlank() || announcementWatchJob?.isActive == true) return
+        announcementWatchJob = viewModelScope.launch {
+            val knownIds = announcementRepository.getCachedAnnouncements(20)
+                .mapTo(mutableSetOf()) { it.id }
+            var baselineReady = knownIds.isNotEmpty()
+            announcementRepository.getAnnouncementsFlow(20).collect { posts ->
+                if (!baselineReady) {
+                    if (posts.isNotEmpty()) {
+                        knownIds.addAll(posts.map { it.id })
+                        baselineReady = true
+                    }
+                    return@collect
+                }
+                val newPosts = posts.filter { it.id !in knownIds && it.authorUid != currentUid }
+                knownIds.addAll(posts.map { it.id })
+                if (newPosts.isNotEmpty()) {
+                    _uiState.update { state ->
+                        state.copy(newAnnouncementCount = state.newAnnouncementCount + newPosts.size)
+                    }
+                    newPosts.asReversed().forEach { post ->
+                        CampusUpdateBus.publish(
+                            CampusUpdateEvent(
+                                key = "post:${post.id}",
+                                message = "New campus post: ${post.title.ifBlank { "Open News to view it" }}",
+                                postId = post.id
+                            )
+                        )
+                    }
+                }
+            }
+        }
     }
 
     fun refreshFriends(forceRefresh: Boolean = false) {

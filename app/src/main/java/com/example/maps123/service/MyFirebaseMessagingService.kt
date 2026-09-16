@@ -10,6 +10,8 @@ import androidx.core.app.NotificationCompat
 import com.example.maps123.MainActivity
 import com.example.maps123.data.firebase.FcmTokenSyncManager
 import com.example.maps123.data.repository.AnnouncementRepository
+import com.example.maps123.ui.CampusUpdateBus
+import com.example.maps123.ui.CampusUpdateEvent
 import com.google.firebase.messaging.FirebaseMessagingService
 import com.google.firebase.messaging.RemoteMessage
 import kotlinx.coroutines.CoroutineScope
@@ -33,17 +35,27 @@ class MyFirebaseMessagingService : FirebaseMessagingService() {
             }
             data["deep_link_chat_id"]?.let {
                 showChatNotification(it, "New message", "Open Campus Map to read your message")
+                CampusUpdateBus.publish(
+                    CampusUpdateEvent("chat:$it", "New chat message")
+                )
             }
             return
         }
         if (data["kind"] == "post_created") {
             val postId = data["deep_link_post_id"] ?: return
             refreshAnnouncementCache()
+            CampusUpdateBus.publish(
+                CampusUpdateEvent(
+                    key = "post:$postId",
+                    message = notificationTitle(remoteMessage, "New campus post"),
+                    postId = postId
+                )
+            )
             showCampusNotification(
                 notificationId = "$postId:post_created".hashCode(),
                 postId = postId,
-                title = remoteMessage.notification?.title ?: "New campus post",
-                body = remoteMessage.notification?.body ?: "Open Campus Map to view it"
+                title = notificationTitle(remoteMessage, "New campus post"),
+                body = notificationBody(remoteMessage, "Open Campus Map to view it")
             )
             return
         }
@@ -56,11 +68,18 @@ class MyFirebaseMessagingService : FirebaseMessagingService() {
         ) {
             if (data["recipientId"] != com.example.maps123.data.repository.AuthRepository.currentUserId()) return
             val postId = data["deep_link_post_id"] ?: return
+            CampusUpdateBus.publish(
+                CampusUpdateEvent(
+                    key = "${data["kind"]}:$postId",
+                    message = notificationTitle(remoteMessage, "Campus Map update"),
+                    postId = postId
+                )
+            )
             showCampusNotification(
                 notificationId = "$postId:${data["kind"]}".hashCode(),
                 postId = postId,
-                title = remoteMessage.notification?.title ?: "Campus Map update",
-                body = remoteMessage.notification?.body ?: "Open Campus Map to view the update"
+                title = notificationTitle(remoteMessage, "Campus Map update"),
+                body = notificationBody(remoteMessage, "Open Campus Map to view the update")
             )
             return
         }
@@ -71,11 +90,17 @@ class MyFirebaseMessagingService : FirebaseMessagingService() {
             )
         ) {
             if (data["recipientId"] != com.example.maps123.data.repository.AuthRepository.currentUserId()) return
+            CampusUpdateBus.publish(
+                CampusUpdateEvent(
+                    key = "${data["kind"]}:${data["requestId"]}",
+                    message = notificationTitle(remoteMessage, "Friend update")
+                )
+            )
             showCampusNotification(
                 notificationId = "friends:${data["kind"]}:${data["requestId"]}".hashCode(),
                 openFriends = true,
-                title = remoteMessage.notification?.title ?: "Friend update",
-                body = remoteMessage.notification?.body ?: "Open Campus Map to view it"
+                title = notificationTitle(remoteMessage, "Friend update"),
+                body = notificationBody(remoteMessage, "Open Campus Map to view it")
             )
             return
         }
@@ -97,6 +122,12 @@ class MyFirebaseMessagingService : FirebaseMessagingService() {
             runCatching { AnnouncementRepository(applicationContext).refreshNow() }
         }
     }
+
+    private fun notificationTitle(message: RemoteMessage, fallback: String) =
+        message.notification?.title ?: message.data["notification_title"] ?: fallback
+
+    private fun notificationBody(message: RemoteMessage, fallback: String) =
+        message.notification?.body ?: message.data["notification_body"] ?: fallback
 
     private fun showChatNotification(chatId: String, title: String, body: String) {
         val channelId = "chat_notifications"

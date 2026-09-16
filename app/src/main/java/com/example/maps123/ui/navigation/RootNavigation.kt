@@ -27,6 +27,15 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.LaunchedEffect
 import com.example.maps123.ui.screens.UpdatePasswordDialog
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.SnackbarResult
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import com.example.maps123.ui.CampusUpdateBus
 
 @Composable
 fun RootNavigation(
@@ -40,6 +49,7 @@ fun RootNavigation(
     val scope = rememberCoroutineScope()
     val passwordUpdateRequired by PasswordRecoveryManager.isPasswordUpdateRequired.collectAsState()
     val navController = rememberNavController()
+    val updateSnackbar = remember { SnackbarHostState() }
     val startDestination = if (sessionManager.hasActiveSession()) {
         "home"
     } else {
@@ -53,10 +63,24 @@ fun RootNavigation(
         }
     }
 
-    NavHost(
-        navController = navController,
-        startDestination = startDestination
-    ) {
+    LaunchedEffect(navController) {
+        CampusUpdateBus.events.collect { event ->
+            val result = updateSnackbar.showSnackbar(
+                message = event.message,
+                actionLabel = event.postId?.let { "View" },
+                withDismissAction = true
+            )
+            if (result == SnackbarResult.ActionPerformed && event.postId != null) {
+                navController.navigate("post/${event.postId}") { launchSingleTop = true }
+            }
+        }
+    }
+
+    Box(Modifier.fillMaxSize()) {
+        NavHost(
+            navController = navController,
+            startDestination = startDestination
+        ) {
 
         composable("login") {
             LoginScreen(
@@ -148,6 +172,13 @@ fun RootNavigation(
                 )
             }
         }
+        }
+        SnackbarHost(
+            hostState = updateSnackbar,
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .navigationBarsPadding()
+        )
     }
 
     if (passwordUpdateRequired) {
