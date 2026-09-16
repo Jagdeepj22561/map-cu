@@ -20,6 +20,7 @@ import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.*
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import io.github.jan.supabase.postgrest.from
@@ -196,7 +197,7 @@ private object IosChatStore {
                     row["created_at"]?.jsonPrimitive?.content.orEmpty()
                 ) ?: currentTimeMillis()
                 val content = row["content"]?.jsonPrimitive?.content.orEmpty()
-                val imageUrl = row["image_url"]?.jsonPrimitive?.content
+                val imageUrl = (row["image_url"] as? JsonPrimitive)?.content
                     ?.takeIf { it.isNotBlank() && it != "null" }
                 val existingMessages = messagesFlow(chatId).value
                 if (existingMessages.none { it.messageId == messageId }) {
