@@ -1,33 +1,41 @@
-name: Build iOS Simulator App (.app ZIP)
+name: Build iOS IPA for Sideloadly
 
 on:
   workflow_dispatch:
+    inputs:
+      build_configuration:
+        description: 'Build Configuration'
+        required: true
+        default: 'Release'
+        type: choice
+        options:
+          - Release
+          - Debug
+
+env:
+  # Prevent Gradle OOM on GitHub-hosted macOS runners (overriding local 12GB setting)
+  GRADLE_OPTS: "-Dorg.gradle.jvmargs=-Xmx4096m -XX:MaxMetaspaceSize=1024m -Dfile.encoding=UTF-8"
 
 jobs:
   build:
-    runs-on: macos-15
+    name: Build Unsigned IPA for Device
+    runs-on: macos-14
 
     steps:
-      - name: Checkout
+      - name: Checkout Repository
         uses: actions/checkout@v4
 
-      - name: Setup Java
+      - name: Setup Java 17
         uses: actions/setup-java@v4
         with:
           distribution: 'temurin'
           java-version: '17'
           cache: 'gradle'
 
-      # Keep simulator CI aligned with Kotlin 2.2.21's recommended Xcode line.
-      - name: Select Xcode 26.0.1
-        run: |
-          sudo xcode-select -s /Applications/Xcode_26.0.1.app
-          xcode-select -p
+      - name: Grant Execute Permission to Gradle Wrapper
+        run: chmod +x gradlew
 
-      - name: List available Xcode versions
-        run: ls -la /Applications | grep Xcode
-
-      - name: Cache Kotlin/Native
+      - name: Cache Kotlin/Native Artifacts
         uses: actions/cache@v4
         with:
           path: ~/.konan
@@ -41,90 +49,76 @@ jobs:
           path: |
             iosApp/Pods
             ~/Library/Caches/CocoaPods
-          key: ${{ runner.os }}-pods-${{ hashFiles('iosApp/Podfile', 'iosApp/Podfile.lock', 'shared/shared.podspec', 'shared/build.gradle.kts') }}
+          key: ${{ runner.os }}-pods-${{ hashFiles('iosApp/Podfile', 'shared/shared.podspec', 'shared/build.gradle.kts') }}
           restore-keys: |
             ${{ runner.os }}-pods-
 
-      - name: Generate shared pod artifacts
+      # Step 1: Generate initial podspec and dummy framework so pod install recognizes the shared pod
+      - name: Generate Shared KMP Pod Artifacts
         run: |
-          for attempt in 1 2 3; do
-            ./gradlew :shared:podspec :shared:generateDummyFramework && break
-            if [ "$attempt" -eq 3 ]; then
-              echo "Gradle pod artifact generation failed after 3 attempts"
-              exit 1
-            fi
-            echo "Gradle failed on attempt $attempt, retrying after 20s..."
-            sleep 20
-          done
+          ./gradlew :shared:podspec :shared:generateDummyFramework
 
+      # Step 2: Install CocoaPods to download GoogleMaps, Firebase and create iosApp.xcworkspace
       - name: Install CocoaPods
         run: |
           cd iosApp
           pod install
 
-      - name: Verify CocoaPods integration
+      # Step 3: Build the real shared KMP arm64 framework for physical device (cinterop against downloaded Pods)
+      - name: Build Real Shared KMP Framework for iPhone
         run: |
-          test -f iosApp/Podfile.lock
-          grep -n "shared" iosApp/Podfile.lock
-          test -d iosApp/Pods
+          ./gradlew :shared:syncFramework \
+            -Pkotlin.native.cocoapods.platform=iphoneos \
+            -Pkotlin.native.cocoapods.archs="arm64" \
+            -Pkotlin.native.cocoapods.configuration=${{ github.event.inputs.build_configuration || 'Release' }}
 
-      - name: Build shared framework for simulator
-        run: |
-          set -o pipefail
-          for attempt in 1 2 3; do
-            ./gradlew :shared:syncFramework \
-              -Pkotlin.native.cocoapods.platform=iphonesimulator \
-              -Pkotlin.native.cocoapods.archs="x86_64 arm64" \
-              -Pkotlin.native.cocoapods.configuration=Debug \
-              --stacktrace 2>&1 | tee shared-sync-framework.log && break
-            if [ "$attempt" -eq 3 ]; then
-              echo "Shared framework build failed. Error summary:"
-              grep -nE "(^e:|^error:|Exception|FAILURE:|Execution failed|Caused by:)" shared-sync-framework.log || true
-              exit 1
-            fi
-            echo "Shared framework build failed on attempt $attempt, retrying after 20s..."
-            sleep 20
-          done
-
-      - name: Verify shared framework product
-        run: |
-          find shared/build/cocoapods/framework -name "shared.framework" -print
-
-      - name: Build for Simulator
+      # Step 4: Build iOS app for physical device.
+      # OVERRIDE_KOTLIN_BUILD_IDE_SUPPORTED=YES tells CocoaPods script phase in Xcode to skip re-running Gradle,
+      # avoiding environment/PATH/Java subshell failures.
+      - name: Build iOS App for Device
         run: |
           cd iosApp
           export OVERRIDE_KOTLIN_BUILD_IDE_SUPPORTED=YES
-          set -o pipefail
           xcodebuild \
             -workspace iosApp.xcworkspace \
             -scheme iosApp \
-            -configuration Debug \
-            -sdk iphonesimulator \
-            -derivedDataPath build 2>&1 | tee ../ios-simulator-xcodebuild.log || {
-              echo "Xcode build failed. Error summary:"
-              grep -nE "(^error:|\\*\\* BUILD FAILED \\*\\*|Command .* failed|no such module)" ../ios-simulator-xcodebuild.log || true
-              exit 1
-            }
+            -configuration ${{ github.event.inputs.build_configuration || 'Release' }} \
+            -sdk iphoneos \
+            -derivedDataPath build \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            CODE_SIGN_ENTITLEMENTS="" \
+            ENABLE_USER_SCRIPT_SANDBOXING=NO \
+            build
 
-      # 5. Find .app
-      - name: Package .app
+      # Step 5: Package into standard Sideloadly IPA format (Payload/iosApp.app at root)
+      - name: Package IPA for Sideloadly
         run: |
-          cd iosApp/build/Build/Products/Debug-iphonesimulator
-          ls
-          zip -r iosApp-simulator.zip iosApp.app
+          cd iosApp
+          APP_PATH=$(find build/Build/Products -name "iosApp.app" -type d | head -n 1)
+          echo "Found app bundle at: $APP_PATH"
 
-      # 6. Upload
-      - name: Upload App Bundle
+          if [ -z "$APP_PATH" ]; then
+            echo "Error: iosApp.app not found in build directory!"
+            exit 1
+          fi
+
+          # Prepare Sideloadly-compatible Payload directory
+          rm -rf Payload iosApp.ipa
+          mkdir Payload
+          cp -R "$APP_PATH" Payload/
+
+          # Package into .ipa preserving symlinks
+          zip -r -y iosApp.ipa Payload
+          
+          echo "Successfully created IPA:"
+          ls -lh iosApp.ipa
+
+      # Step 6: Upload IPA artifact for download
+      - name: Upload IPA Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ios-simulator-app
-          path: iosApp/build/Build/Products/Debug-iphonesimulator/iosApp-simulator.zip
-
-      - name: Upload iOS build logs
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: ios-simulator-build-logs
-          path: |
-            shared-sync-framework.log
-            ios-simulator-xcodebuild.log
+          name: iosApp-${{ github.event.inputs.build_configuration || 'Release' }}-sideloadly
+          path: iosApp/iosApp.ipa
+          retention-days: 7
