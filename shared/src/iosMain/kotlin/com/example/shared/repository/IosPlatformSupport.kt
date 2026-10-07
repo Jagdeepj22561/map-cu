@@ -16,7 +16,6 @@ import com.example.shared.Route
 import com.example.shared.RoutesData
 import com.example.shared.campusPlaces
 import com.example.shared.data.SupabaseClientProvider
-import com.example.shared.data.AuthSessionManager
 import io.github.jan.supabase.auth.auth
 import kotlinx.cinterop.ExperimentalForeignApi
 import kotlinx.cinterop.ObjCObjectVar
@@ -432,7 +431,6 @@ internal object IosAuthApi {
         val auth = SupabaseClientProvider.client.auth
         auth.awaitInitialization()
         val storedSession = IosSessionStore.current()
-        AuthSessionManager.accessTokenOrNull()
         val sharedSession = auth.currentSessionOrNull()
         if (sharedSession != null) {
             IosSessionStore.save(
@@ -534,7 +532,7 @@ internal object IosAuthApi {
 /** Minimal PostgREST client so iOS does not need Firebase for profile data. */
 internal object IosSupabase {
     private suspend fun headers(extra: Map<String, String> = emptyMap()): Map<String, String> {
-        val accessToken = AuthSessionManager.accessTokenOrNull()
+        val accessToken = SupabaseClientProvider.client.auth.currentAccessTokenOrNull()
         return buildMap {
             put("apikey", IosPlatformConfig.supabasePublishableKey)
             put("Accept", "application/json")
@@ -799,10 +797,11 @@ internal object IosUserStore {
 
     private fun locationDistanceMeters(lat1: Double, lng1: Double, lat2: Double, lng2: Double): Double {
         val earthRadiusMeters = 6_371_000.0
-        val latDelta = kotlin.math.sin(Math.toRadians(lat2 - lat1) / 2)
-        val lngDelta = kotlin.math.sin(Math.toRadians(lng2 - lng1) / 2)
-        val startLat = Math.toRadians(lat1)
-        val endLat = Math.toRadians(lat2)
+        val toRad = kotlin.math.PI / 180.0
+        val latDelta = kotlin.math.sin(((lat2 - lat1) * toRad) / 2)
+        val lngDelta = kotlin.math.sin(((lng2 - lng1) * toRad) / 2)
+        val startLat = lat1 * toRad
+        val endLat = lat2 * toRad
         val haversine = latDelta * latDelta +
             kotlin.math.cos(startLat) * kotlin.math.cos(endLat) * lngDelta * lngDelta
         return earthRadiusMeters * 2 * kotlin.math.atan2(kotlin.math.sqrt(haversine), kotlin.math.sqrt(1 - haversine))

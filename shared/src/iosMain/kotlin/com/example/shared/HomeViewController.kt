@@ -230,12 +230,7 @@ internal fun HomeRoute(
         runCatching { IosAuthApi.restoreSharedSession() }
         chatRepository.startSync()
         runCatching { IosUserStore.refreshCurrentUser() }
-        runCatching { announcementRepository.refreshNow() }
         currentLocation = currentUser?.location ?: defaultLocation
-    }
-
-    DisposableEffect(announcementRepository) {
-        onDispose { announcementRepository.stopSync() }
     }
 
     DisposableEffect(currentScreen == PureAppScreen.MAP) {
@@ -281,7 +276,6 @@ internal fun HomeRoute(
     LaunchedEffect(currentScreen) {
         if (currentScreen == PureAppScreen.ANNOUNCEMENTS) {
             IosPreferencesStore.setLastAnnouncementSeen(currentTimeMillis())
-            runCatching { announcementRepository.refreshNow() }
         }
         if (currentScreen == PureAppScreen.PROFILE) {
             runCatching { IosUserStore.refreshCurrentUser() }
@@ -461,7 +455,7 @@ internal fun HomeRoute(
             initialType = AnnouncementType.values().getOrElse(announcementTab) { AnnouncementType.NEWS },
             onDismiss = { showCreatePostDialog = false },
             isLoading = false,
-            onPost = { title, content, type, itemName, place, time, reward, eventVenue, eventTime, eventPurpose, eventDlType, eventMode, eventMaxMembers, eventDepartments, eventLink ->
+            onPost = { title, content, type, itemName, place, time, reward, eventVenue, eventTime, eventPurpose, eventDlType, eventMode, eventMaxMembers, eventDepartments, eventLink, eventCategory ->
                 scope.launch {
                     runCatching {
                         val profile = currentUser ?: IosUserProfile(
@@ -489,7 +483,8 @@ internal fun HomeRoute(
                             eventMode = eventMode,
                             eventMaxMembers = eventMaxMembers,
                             eventDepartments = eventDepartments,
-                            eventLink = eventLink
+                            eventLink = eventLink,
+                            eventCategory = eventCategory
                         )
                         announcementRepository.createAnnouncement(announcement)
                         showCreatePostDialog = false
@@ -784,7 +779,6 @@ internal fun HomeRoute(
                                                 chatToDelete = chat
                                                 showDeleteDialog = true
                                             },
-                                            onGroupLongClick = {},
                                             searchQuery = searchQuery,
                                             onMessagePrivately = { senderUid, senderName ->
                                                 scope.launch {
@@ -865,8 +859,9 @@ internal fun HomeRoute(
                                                 IosRemoteImage(url, modifier, scale)
                                             },
                                             currentUid = currentUser?.uid,
-                                            searchQuery = searchQuery,
-                                            onSearchQueryChange = { searchQuery = it }
+                                            onContactAuthor = { selectedAnnouncement ->
+                                                selectedAnnouncementId = selectedAnnouncement.id
+                                            }
                                         )
                                     }
                                 }

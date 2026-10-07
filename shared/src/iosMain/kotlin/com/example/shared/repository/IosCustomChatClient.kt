@@ -1,6 +1,7 @@
 package com.example.shared.repository
 
-import com.example.shared.data.AuthSessionManager
+import com.example.shared.data.SupabaseClientProvider
+import io.github.jan.supabase.auth.auth
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.darwin.Darwin
 import io.ktor.client.plugins.websocket.WebSockets
@@ -40,7 +41,7 @@ internal class IosCustomChatClient {
             var backoff = 1_000L
             while (isActive) {
                 try {
-                    val token = AuthSessionManager.requireAccessToken()
+                    val token = SupabaseClientProvider.client.auth.currentAccessTokenOrNull() ?: ""
                     val url = IosPlatformConfig.backendBaseUrl
                         .replaceFirst("https://", "wss://")
                         .replaceFirst("http://", "ws://")
