@@ -73,6 +73,9 @@ jobs:
       # Step 3: Build the real shared KMP arm64 framework for physical device (cinterop against downloaded Pods)
       - name: Build Real Shared KMP Framework for iPhone
         run: |
+          export CODE_SIGNING_ALLOWED=NO
+          export CODE_SIGNING_REQUIRED=NO
+          export CODE_SIGN_IDENTITY=""
           ./gradlew :shared:syncFramework \
             -Pkotlin.native.cocoapods.platform=iphoneos \
             -Pkotlin.native.cocoapods.archs="arm64" \
