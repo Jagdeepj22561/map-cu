@@ -32,8 +32,11 @@ jobs:
           java-version: '17'
           cache: 'gradle'
 
-      - name: Grant Execute Permission to Gradle Wrapper
-        run: chmod +x gradlew
+      - name: Grant Execute Permission to Gradle Wrapper & Disable Daemon Toolchain
+        run: |
+          chmod +x gradlew
+          # Ensure Gradle uses the installed Java 17 directly and never attempts to download via foojay
+          rm -f gradle/gradle-daemon-jvm.properties
 
       - name: Cache Kotlin/Native Artifacts
         uses: actions/cache@v4
@@ -56,7 +59,7 @@ jobs:
       # Step 1: Generate initial podspec and dummy framework so pod install recognizes the shared pod
       - name: Generate Shared KMP Pod Artifacts
         run: |
-          ./gradlew :shared:podspec :shared:generateDummyFramework
+          ./gradlew :shared:podspec :shared:generateDummyFramework --no-daemon
 
       # Step 2: Install CocoaPods to download GoogleMaps, Firebase and create iosApp.xcworkspace
       - name: Install CocoaPods
@@ -70,7 +73,8 @@ jobs:
           ./gradlew :shared:syncFramework \
             -Pkotlin.native.cocoapods.platform=iphoneos \
             -Pkotlin.native.cocoapods.archs="arm64" \
-            -Pkotlin.native.cocoapods.configuration=${{ github.event.inputs.build_configuration || 'Release' }}
+            -Pkotlin.native.cocoapods.configuration=${{ github.event.inputs.build_configuration || 'Release' }} \
+            --no-daemon
 
       # Step 4: Build iOS app for physical device.
       # OVERRIDE_KOTLIN_BUILD_IDE_SUPPORTED=YES tells CocoaPods script phase in Xcode to skip re-running Gradle,
