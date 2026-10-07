@@ -9,17 +9,15 @@ import cocoapods.FirebaseFirestore.FIRCollectionReference
 import cocoapods.FirebaseFirestore.FIRQuery
 import cocoapods.FirebaseFirestore.FIRFieldValue
 import cocoapods.FirebaseFirestore.FIRSetOptions
-import cocoapods.FirebaseDatabase.FIRDataEventType
-import cocoapods.FirebaseDatabase.FIRDataSnapshot
-import cocoapods.FirebaseDatabase.FIRDatabase
-import cocoapods.FirebaseDatabase.FIRDatabaseQuery
-import cocoapods.FirebaseDatabase.FIRDatabaseReference
 import com.example.shared.GeoPoint
 import com.example.shared.Place
 import com.example.shared.PlaceCategory
 import com.example.shared.Route
 import com.example.shared.RoutesData
 import com.example.shared.campusPlaces
+import com.example.shared.data.SupabaseClientProvider
+import com.example.shared.data.AuthSessionManager
+import io.github.jan.supabase.auth.auth
 import kotlinx.cinterop.ExperimentalForeignApi
 import kotlinx.cinterop.ObjCObjectVar
 import kotlinx.cinterop.alloc
@@ -33,7 +31,6 @@ import kotlin.coroutines.resumeWithException
 
 internal object IosPlatformConfig {
     const val backendBaseUrl = "https://campus-map-backend-fpz8.onrender.com"
-    const val backendApiKey = "super_secret_key_here"
     val supabaseUrl: String
         get() = (NSBundle.mainBundle.objectForInfoDictionaryKey("SUPABASE_URL") as? String).orEmpty().trimEnd('/')
     val supabasePublishableKey: String
@@ -409,7 +406,7 @@ internal object IosHttpClient {
     }
 }
 
-internal object IosFirebaseRest {
+internal object IosAuthApi {
     suspend fun login(email: String, password: String): IosAuthSession {
         requireSupabaseConfiguration()
         val response = IosHttpClient.requestJson(
@@ -427,7 +424,42 @@ internal object IosFirebaseRest {
             refreshToken = payload["refresh_token"].stringValue().takeIf { it.isNotBlank() }
         )
         IosSessionStore.save(session)
+        importSharedSession(session)
         return session
+    }
+
+    suspend fun restoreSharedSession() {
+        val auth = SupabaseClientProvider.client.auth
+        auth.awaitInitialization()
+        val storedSession = IosSessionStore.current()
+        AuthSessionManager.accessTokenOrNull()
+        val sharedSession = auth.currentSessionOrNull()
+        if (sharedSession != null) {
+            IosSessionStore.save(
+                IosAuthSession(
+                    uid = sharedSession.user?.id ?: storedSession?.uid.orEmpty(),
+                    email = sharedSession.user?.email ?: storedSession?.email.orEmpty(),
+                    idToken = sharedSession.accessToken,
+                    refreshToken = sharedSession.refreshToken.takeIf(String::isNotBlank)
+                )
+            )
+        } else if (storedSession != null) {
+            importSharedSession(storedSession)
+        }
+    }
+
+    suspend fun logout() {
+        runCatching { SupabaseClientProvider.client.auth.signOut() }
+        IosSessionStore.clear()
+    }
+
+    private suspend fun importSharedSession(session: IosAuthSession) {
+        SupabaseClientProvider.client.auth.importAuthToken(
+            accessToken = session.idToken,
+            refreshToken = session.refreshToken.orEmpty(),
+            retrieveUser = true,
+            autoRefresh = !session.refreshToken.isNullOrBlank()
+        )
     }
 
     suspend fun sendPasswordReset(email: String) {
@@ -436,7 +468,7 @@ internal object IosFirebaseRest {
             urlString = "${IosPlatformConfig.supabaseUrl}/auth/v1/recover",
             method = "POST",
             headers = supabaseHeaders(),
-            body = mapOf("email" to email.trim(), "redirect_to" to "maps123://auth")
+            body = mapOf("email" to email.trim(), "redirect_to" to "https://campus-map-backend-fpz8.onrender.com/auth/callback")
         )
         ensureSuccess(response)
     }
@@ -476,8 +508,7 @@ internal object IosFirebaseRest {
     }
 
     private fun backendHeaders(): Map<String, String> = mapOf(
-        "Accept" to "application/json",
-        "X-API-Key" to IosPlatformConfig.backendApiKey
+        "Accept" to "application/json"
     )
 
     private fun supabaseHeaders(): Map<String, String> = mapOf(
@@ -502,12 +533,12 @@ internal object IosFirebaseRest {
 
 /** Minimal PostgREST client so iOS does not need Firebase for profile data. */
 internal object IosSupabase {
-    private fun headers(extra: Map<String, String> = emptyMap()): Map<String, String> {
-        val session = IosSessionStore.current()
+    private suspend fun headers(extra: Map<String, String> = emptyMap()): Map<String, String> {
+        val accessToken = AuthSessionManager.accessTokenOrNull()
         return buildMap {
             put("apikey", IosPlatformConfig.supabasePublishableKey)
             put("Accept", "application/json")
-            session?.idToken?.takeIf { it.isNotBlank() }?.let { put("Authorization", "Bearer $it") }
+            accessToken?.takeIf { it.isNotBlank() }?.let { put("Authorization", "Bearer $it") }
             putAll(extra)
         }
     }
@@ -970,7 +1001,9 @@ fun iosCurrentSessionEmail(): String = IosSessionStore.current()?.email ?: ""
 
 fun iosCurrentSessionUid(): String = IosSessionStore.current()?.uid ?: ""
 
-fun iosCurrentSessionAccessToken(): String = IosSessionStore.current()?.idToken ?: ""
+fun iosCurrentSessionAccessToken(): String =
+    SupabaseClientProvider.client.auth.currentAccessTokenOrNull()
+        ?: IosSessionStore.current()?.idToken.orEmpty()
 
 private fun String.firebaseFriendlyMessage(): String {
     return when (trim()) {

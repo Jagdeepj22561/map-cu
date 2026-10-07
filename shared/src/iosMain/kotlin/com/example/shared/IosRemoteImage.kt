@@ -15,6 +15,12 @@ import com.example.shared.ui.PureAvatarPlaceholder
 import platform.CoreGraphics.CGRectMake
 import platform.UIKit.UIImage
 import platform.UIKit.UIImageView
+import platform.Foundation.NSData
+import platform.Foundation.NSMutableURLRequest
+import platform.Foundation.NSURL
+import platform.Foundation.NSURLSession
+import platform.darwin.dispatch_async
+import platform.darwin.dispatch_get_main_queue
 import platform.darwin.NSObject
 
 internal object IosRemoteImageCache {
@@ -29,6 +35,8 @@ internal object IosRemoteImageCache {
 
 internal class RemoteImageView : UIImageView(frame = CGRectMake(0.0, 0.0, 0.0, 0.0)) {
     var currentUrl: String? = null
+    var loadingUrl: String? = null
+    var imageTask: platform.Foundation.NSURLSessionDataTask? = null
 }
 
 @Composable
@@ -43,8 +51,6 @@ internal fun IosRemoteImage(
     }
 
     val latestUrl = rememberUpdatedState(imageUrl)
-    val latestContentScale = rememberUpdatedState(contentScale)
-
     Box(modifier = modifier.background(Color.Transparent)) {
         PureAvatarPlaceholder(modifier = Modifier.fillMaxSize())
 
@@ -80,6 +86,29 @@ internal fun loadRemoteImage(
     }
 
     imageView.image = null
-    // Keep iOS compile-safe for now; remote image loading can be restored once
-    // the simulator toolchain issues are fully resolved.
+    if (imageView.loadingUrl == urlString) return
+    imageView.imageTask?.cancel()
+    imageView.loadingUrl = urlString
+
+    val url = NSURL(string = urlString) ?: run {
+        imageView.loadingUrl = null
+        return
+    }
+    val request = NSMutableURLRequest.requestWithURL(url) as NSMutableURLRequest
+    imageView.imageTask = NSURLSession.sharedSession.dataTaskWithRequest(request) {
+            data: NSData?, _, _ ->
+        val decoded = data?.let { UIImage.imageWithData(it) }
+        dispatch_async(dispatch_get_main_queue()) {
+            // A recycled Compose cell may now represent another URL. Never
+            // let a late response paint the wrong profile/post image.
+            if (imageView.currentUrl != urlString) return@dispatch_async
+            imageView.loadingUrl = null
+            imageView.imageTask = null
+            if (decoded != null) {
+                IosRemoteImageCache.put(urlString, decoded)
+                imageView.image = decoded
+            }
+        }
+    }
+    imageView.imageTask?.resume()
 }

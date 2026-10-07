@@ -45,12 +45,11 @@ import androidx.compose.ui.unit.dp
 import com.example.shared.model.Announcement
 import com.example.shared.model.AnnouncementType
 import com.example.shared.model.PureChat
-import com.example.shared.model.PureGroup
 import com.example.shared.model.buildAnnouncementId
 import com.example.shared.repository.AnnouncementRepository
-import com.example.shared.repository.ChatRepository
+import com.example.shared.repository.IosChatRepository
+import com.example.shared.repository.IosAuthApi
 import com.example.shared.repository.IosPreferencesStore
-import com.example.shared.repository.IosSessionStore
 import com.example.shared.repository.IosLocalDatabaseStore
 import com.example.shared.repository.IosUserProfile
 import com.example.shared.repository.IosUserStore
@@ -60,7 +59,6 @@ import com.example.shared.ui.PureAppScreen
 import com.example.shared.ui.PureAppTheme
 import com.example.shared.ui.PureAvatarPlaceholder
 import com.example.shared.ui.PureChatScreen
-import com.example.shared.ui.PureCreateGroupBottomSheet
 import com.example.shared.ui.PureCreatePostDialog
 import com.example.shared.ui.PureDeleteChatDialog
 import com.example.shared.ui.PureFriendManagerBottomSheet
@@ -70,7 +68,6 @@ import com.example.shared.ui.PureNearbyUsersBottomSheet
 import com.example.shared.ui.PureNewChatBottomSheet
 import com.example.shared.ui.PureRoutePickerBottomSheet
 import com.example.shared.ui.PureSettingsScreen
-import com.example.shared.utils.GroupLinkPayload
 import com.example.shared.utils.ExternalNavigator
 import com.example.shared.utils.ArrivalChecker
 import com.example.shared.utils.GeoUtils
@@ -160,19 +157,20 @@ internal fun HomeRoute(
     onLogout: () -> Unit
 ) {
     val scope = rememberCoroutineScope()
-    val chatRepository = remember { ChatRepository() }
+    val chatRepository = remember { IosChatRepository() }
     val announcementRepository = remember { AnnouncementRepository() }
 
     val currentUser by IosUserStore.currentUser.collectAsState(initial = null)
     val chats by chatRepository.allChats.collectAsState(initial = emptyList())
-    val groups by chatRepository.allGroups.collectAsState(initial = emptyList())
     val friends by chatRepository.friends.collectAsState(initial = emptyList())
     val requests by chatRepository.friendRequests.collectAsState(initial = emptyList())
     val announcements by announcementRepository.getAnnouncementsFlow().collectAsState(initial = emptyList())
     val liveLocation by IosLocationService.location.collectAsState(initial = null)
 
-    var currentScreen by remember { mutableStateOf(PureAppScreen.CHAT) }
-    var previousScreen by remember { mutableStateOf(PureAppScreen.CHAT) }
+    // Keep iOS on the same root destination as Android. Detail routes retain
+    // their predecessor explicitly so toolbar Back follows the actual flow.
+    var currentScreen by remember { mutableStateOf(PureAppScreen.MAP) }
+    var previousScreen by remember { mutableStateOf(PureAppScreen.MAP) }
     var searchQuery by remember { mutableStateOf("") }
     var isSearching by remember { mutableStateOf(false) }
     var isFilterDockVisible by remember { mutableStateOf(false) }
@@ -182,9 +180,8 @@ internal fun HomeRoute(
     var announcementTab by remember { mutableIntStateOf(0) }
 
     var selectedChat by remember { mutableStateOf<PureChat?>(null) }
-    var selectedGroup by remember { mutableStateOf<PureGroup?>(null) }
-    var selectedGroupPreview by remember { mutableStateOf<GroupLinkPayload?>(null) }
     var selectedAnnouncementId by remember { mutableStateOf<String?>(null) }
+    var announcementReturnScreen by remember { mutableStateOf(PureAppScreen.ANNOUNCEMENTS) }
     var selectedFriendUid by remember { mutableStateOf<String?>(null) }
     var friendProfile by remember { mutableStateOf<IosUserProfile?>(null) }
     var chatToDelete by remember { mutableStateOf<PureChat?>(null) }
@@ -192,14 +189,11 @@ internal fun HomeRoute(
 
     var showFriendManager by remember { mutableStateOf(false) }
     var showNewChatSheet by remember { mutableStateOf(false) }
-    var showCreateGroupSheet by remember { mutableStateOf(false) }
-    var showDeleteGroupDialog by remember { mutableStateOf(false) }
     var showNearbySheet by remember { mutableStateOf(false) }
     var showCreatePostDialog by remember { mutableStateOf(false) }
     var showRoutePicker by remember { mutableStateOf(false) }
     var nearbyUsers by remember { mutableStateOf<List<com.example.shared.model.PureUser>>(emptyList()) }
     var nearbyLoading by remember { mutableStateOf(false) }
-    var groupToDelete by remember { mutableStateOf<PureGroup?>(null) }
 
     var isDarkMode by remember { mutableStateOf(IosPreferencesStore.isDarkMode()) }
     var isAudioEnabled by remember { mutableStateOf(IosPreferencesStore.isAudioEnabled()) }
@@ -233,10 +227,15 @@ internal fun HomeRoute(
     }
 
     LaunchedEffect(Unit) {
+        runCatching { IosAuthApi.restoreSharedSession() }
         chatRepository.startSync()
         runCatching { IosUserStore.refreshCurrentUser() }
         runCatching { announcementRepository.refreshNow() }
         currentLocation = currentUser?.location ?: defaultLocation
+    }
+
+    DisposableEffect(announcementRepository) {
+        onDispose { announcementRepository.stopSync() }
     }
 
     DisposableEffect(currentScreen == PureAppScreen.MAP) {
@@ -321,8 +320,6 @@ internal fun HomeRoute(
 
     fun resetSelections(next: PureAppScreen) {
         selectedChat = null
-        selectedGroup = null
-        selectedGroupPreview = null
         selectedAnnouncementId = null
         if (next == PureAppScreen.MAP) {
             friendProfile = null
@@ -363,8 +360,18 @@ internal fun HomeRoute(
 
     val externalNavigator = remember {
         object : ExternalNavigator {
-            override fun reportIssue() {}
-            override fun callHelpline(number: String) {}
+            override fun reportIssue() {
+                if (!openIosExternalUrl("mailto:jagdeepsingh3505j@gmail.com")) {
+                    errorMessage = "No mail app is configured on this device."
+                }
+            }
+
+            override fun callHelpline(number: String) {
+                val url = iosHelplineUrl(number)
+                if (url == null || !openIosExternalUrl(url)) {
+                    errorMessage = "Unable to open the phone app for this number."
+                }
+            }
         }
     }
 
@@ -376,7 +383,6 @@ internal fun HomeRoute(
                 scope.launch {
                     runCatching {
                         val chatId = chatRepository.createChatForFriend(friend.uid, friend.name)
-                        selectedGroup = null
                         selectedChat = PureChat(
                             chatId = chatId,
                             friendUid = friend.uid,
@@ -410,9 +416,8 @@ internal fun HomeRoute(
         )
     }
 
-    var featuredGroups by remember { mutableStateOf<List<PureGroupDiscoveryItem>>(emptyList()) }
-    var groupSearchResult by remember { mutableStateOf<PureGroupDiscoveryItem?>(null) }
-
+    /* Retired iOS-only Firestore group management. Community/team UI is now
+       provided by PureGroupsScreen through PureChatScreen on both platforms.
     if (showCreateGroupSheet) {
         LaunchedEffect(showCreateGroupSheet) {
             featuredGroups = chatRepository.getFeaturedGroups().map { PureGroupDiscoveryItem(it, groups.any { joined -> joined.groupId == it.groupId }) }
@@ -449,6 +454,7 @@ internal fun HomeRoute(
             renderImage = { url, modifier, scale -> IosRemoteImage(url, modifier, scale) }
         )
     }
+    */
 
     if (showCreatePostDialog) {
         PureCreatePostDialog(
@@ -520,27 +526,6 @@ internal fun HomeRoute(
         )
     }
 
-    if (showDeleteGroupDialog && groupToDelete != null) {
-        PureDeleteGroupDialog(
-            groupName = groupToDelete?.name ?: "this group",
-            onDismiss = {
-                showDeleteGroupDialog = false
-                groupToDelete = null
-            },
-            onConfirm = {
-                val target = groupToDelete ?: return@PureDeleteGroupDialog
-                showDeleteGroupDialog = false
-                groupToDelete = null
-                scope.launch {
-                    runCatching {
-                        chatRepository.exitGroup(target.groupId)
-                        chatRepository.refreshGroupsNow()
-                    }.onFailure { errorMessage = it.message ?: "Failed to remove group" }
-                }
-            }
-        )
-    }
-
     if (showFriendManager) {
         PureFriendManagerBottomSheet(
             friends = friends,
@@ -573,6 +558,7 @@ internal fun HomeRoute(
             onProfileClick = { uid ->
                 selectedFriendUid = uid
                 showFriendManager = false
+                previousScreen = PureAppScreen.CHAT
                 currentScreen = PureAppScreen.FRIEND_PROFILE
             },
             renderImage = { url, modifier, scale ->
@@ -625,7 +611,7 @@ internal fun HomeRoute(
             hideBars = isDetailActive
         ) { padding ->
             val overlayTopPadding = when {
-                currentScreen == PureAppScreen.CHAT && selectedChat == null && selectedGroup == null ->
+                currentScreen == PureAppScreen.CHAT && selectedChat == null ->
                     padding.calculateTopPadding()
                 currentScreen == PureAppScreen.ANNOUNCEMENTS && selectedAnnouncementId == null ->
                     padding.calculateTopPadding()
@@ -765,18 +751,16 @@ internal fun HomeRoute(
                                         onBack = { selectedChat = null },
                                         onProfileClick = { uid ->
                                             selectedFriendUid = uid
+                                            previousScreen = PureAppScreen.CHAT
                                             currentScreen = PureAppScreen.FRIEND_PROFILE
-                                        },
-                                        onOpenGroupLink = {
-                                            errorMessage = "Group section has been removed"
                                         }
                                     )
                                 } else {
                                     Box(modifier = Modifier.fillMaxSize()) {
                                         PureChatScreen(
                                             repository = chatRepository,
-                                            selectedTab = 0,
-                                            onTabSelected = { chatTab = 0 },
+                                            selectedTab = chatTab,
+                                            onTabSelected = { chatTab = it },
                                             onChatClick = { chat -> selectedChat = chat },
                                             onGroupClick = {},
                                             onAddFriendClick = { showFriendManager = true },
@@ -802,6 +786,23 @@ internal fun HomeRoute(
                                             },
                                             onGroupLongClick = {},
                                             searchQuery = searchQuery,
+                                            onMessagePrivately = { senderUid, senderName ->
+                                                scope.launch {
+                                                    runCatching {
+                                                        val chatId = chatRepository.createChatForFriend(senderUid, senderName)
+                                                        selectedChat = PureChat(
+                                                            chatId = chatId,
+                                                            friendUid = senderUid,
+                                                            friendName = senderName,
+                                                            lastMessage = "",
+                                                            lastMessageTime = currentTimeMillis()
+                                                        )
+                                                        chatTab = 0
+                                                    }.onFailure {
+                                                        errorMessage = it.message ?: "Unable to open private chat"
+                                                    }
+                                                }
+                                            },
                                             renderImage = { url, modifier, scale ->
                                                 IosRemoteImage(url, modifier, scale)
                                             }
@@ -816,7 +817,10 @@ internal fun HomeRoute(
                                         announcementId = selectedAnnouncementId!!,
                                         repository = announcementRepository,
                                         currentUser = currentUser,
-                                        onBack = { selectedAnnouncementId = null }
+                                        onBack = {
+                                            selectedAnnouncementId = null
+                                            currentScreen = announcementReturnScreen
+                                        }
                                     )
                                 } else {
                                     val filteredAnnouncements = announcements.filter {
@@ -840,6 +844,7 @@ internal fun HomeRoute(
                                             currentUser = currentUser?.toPureUser(),
                                             onAnnouncementClick = { announcementId ->
                                                 selectedAnnouncementId = announcementId
+                                                announcementReturnScreen = PureAppScreen.ANNOUNCEMENTS
                                             },
                                             onCreatePostClick = {
                                                 showCreatePostDialog = true
@@ -859,7 +864,9 @@ internal fun HomeRoute(
                                             renderImage = { url, modifier, scale ->
                                                 IosRemoteImage(url, modifier, scale)
                                             },
-                                            currentUid = currentUser?.uid
+                                            currentUid = currentUser?.uid,
+                                            searchQuery = searchQuery,
+                                            onSearchQueryChange = { searchQuery = it }
                                         )
                                     }
                                 }
@@ -891,7 +898,10 @@ internal fun HomeRoute(
                                                     .onFailure { errorMessage = it.message ?: "Failed to update ghost mode" }
                                             }
                                         },
-                                        onProfileClick = { currentScreen = PureAppScreen.PROFILE },
+                                        onProfileClick = {
+                                            previousScreen = PureAppScreen.SETTINGS
+                                            currentScreen = PureAppScreen.PROFILE
+                                        },
                                         onOpenDebugLog = {
                                             IosInAppDebugLogStore.log("Opened debug log screen")
                                             showDebugLog = true
@@ -899,9 +909,11 @@ internal fun HomeRoute(
                                         onLogout = {
                                             chatRepository.clearAllListeners()
                                             chatRepository.resetSessionState()
-                                            IosSessionStore.clear()
                                             IosUserStore.resetCurrentUser()
-                                            onLogout()
+                                            scope.launch {
+                                                IosAuthApi.logout()
+                                                onLogout()
+                                            }
                                         },
                                         onBack = { currentScreen = previousScreen },
                                         externalNavigator = externalNavigator
@@ -922,6 +934,7 @@ internal fun HomeRoute(
                                     onBack = { currentScreen = previousScreen },
                                     onOpenPost = { postId ->
                                         selectedAnnouncementId = postId
+                                        announcementReturnScreen = PureAppScreen.PROFILE
                                         currentScreen = PureAppScreen.ANNOUNCEMENTS
                                     },
                                     onProfileSaved = {}
@@ -935,9 +948,10 @@ internal fun HomeRoute(
                                         currentUserUid = currentUser?.uid,
                                         announcements = announcements,
                                         readOnly = profile.uid != (currentUser?.uid ?: ""),
-                                        onBack = { currentScreen = PureAppScreen.CHAT },
+                                        onBack = { currentScreen = previousScreen },
                                         onOpenPost = { postId ->
                                             selectedAnnouncementId = postId
+                                            announcementReturnScreen = PureAppScreen.FRIEND_PROFILE
                                             currentScreen = PureAppScreen.ANNOUNCEMENTS
                                         },
                                         onProfileSaved = {}
@@ -1141,8 +1155,9 @@ internal fun IosMapKitView(
 
             val activeRoute = latestActiveRoute
             if (latestIsNavigating && activeRoute != null) {
+                val remainingPoints = remainingRoutePoints(latestLocation, activeRoute)
                 val path = GMSMutablePath()
-                activeRoute.points.forEach { point ->
+                remainingPoints.forEach { point ->
                     path.addLatitude(point.lat, longitude = point.lng)
                 }
                 val polyline = GMSPolyline()

@@ -7,12 +7,17 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.DeleteSweep
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
+import androidx.compose.material3.Card
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -39,10 +44,9 @@ import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.unit.dp
 import com.example.shared.model.Announcement
 import com.example.shared.model.PureChat
-import com.example.shared.model.PureGroup
 import com.example.shared.repository.AnnouncementRepository
-import com.example.shared.repository.ChatRepository
-import com.example.shared.repository.IosGroupMember
+import com.example.shared.repository.IosChatRepository
+import com.example.shared.repository.IosChatRequestState
 import com.example.shared.repository.IosPreferencesStore
 import com.example.shared.repository.IosUserProfile
 import com.example.shared.repository.IosUserStore
@@ -51,25 +55,18 @@ import com.example.shared.ui.PureAnnouncementCard
 import com.example.shared.ui.PureAnnouncementDetailScreen
 import com.example.shared.ui.PureAvatarPlaceholder
 import com.example.shared.ui.PureChatDetailScreen
-import com.example.shared.ui.PureGroupChatDetailScreen
-import com.example.shared.ui.PureGroupInfoScreen
-import com.example.shared.ui.PureGroupInfoLine
-import com.example.shared.ui.PureGroupMember as UiGroupMember
 import com.example.shared.ui.PureProfileScreen
 import com.example.shared.ui.PureReportDialog
 import com.example.shared.ui.PureSharePostDialog
-import com.example.shared.utils.GroupLinkPayload
-import com.example.shared.utils.buildGroupLink
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.delay
 
 @Composable
 internal fun IosChatDetailContent(
     chat: PureChat,
-    repository: ChatRepository,
+    repository: IosChatRepository,
     onBack: () -> Unit,
-    onProfileClick: (String) -> Unit,
-    onOpenGroupLink: (GroupLinkPayload) -> Unit
+    onProfileClick: (String) -> Unit
 ) {
     val scope = rememberCoroutineScope()
     val clipboard = LocalClipboardManager.current
@@ -79,11 +76,32 @@ internal fun IosChatDetailContent(
     var searchQuery by remember { mutableStateOf("") }
     var isSearchActive by remember { mutableStateOf(false) }
     var errorMessage by remember { mutableStateOf<String?>(null) }
+    var requestState by remember { mutableStateOf<IosChatRequestState?>(null) }
+    var requestActionBusy by remember { mutableStateOf(false) }
+    var isFriendUser by remember { mutableStateOf(false) }
+    var requestStateLoading by remember { mutableStateOf(true) }
 
     LaunchedEffect(chat.chatId) {
         repository.setActiveChat(chat.chatId)
         runCatching { repository.markChatRead(chat.chatId) }
         runCatching { isBlocked = repository.isUserBlocked(chat.friendUid) }
+        runCatching {
+            isFriendUser = repository.isFriend(chat.friendUid)
+            requestState = repository.getChatRequestState(chat.friendUid)
+        }
+        requestStateLoading = false
+    }
+
+    LaunchedEffect(chat.chatId, chat.friendUid) {
+        while (true) {
+            runCatching {
+                val friend = repository.isFriend(chat.friendUid)
+                val state = repository.getChatRequestState(chat.friendUid)
+                isFriendUser = friend
+                requestState = if (friend) null else state
+            }
+            delay(10_000)
+        }
     }
 
     DisposableEffect(chat.chatId) {
@@ -103,18 +121,17 @@ internal fun IosChatDetailContent(
             scope.launch {
                 runCatching {
                     repository.sendMessage(chat.chatId, content, chat.friendUid)
+                    if (!isFriendUser) requestState = IosChatRequestState("pending", incoming = false)
                 }.onFailure { errorMessage = it.message ?: "Failed to send message" }
             }
         },
         onPickImage = {
             errorMessage = "Image upload is not wired to the native iOS picker yet"
         },
-        onDeleteMessages = { ids, isForEveryone ->
+        onDeleteMessages = { ids, _ ->
             scope.launch {
-                runCatching {
-                    if (isForEveryone) repository.deleteMessagesForEveryone(chat.chatId, ids.toList())
-                    else repository.deleteMessagesLocally(ids.toList())
-                }.onFailure { errorMessage = it.message ?: "Failed to delete message" }
+                runCatching { repository.deleteMessagesLocally(ids.toList()) }
+                    .onFailure { errorMessage = it.message ?: "Failed to delete message" }
             }
         },
         onCopyMessages = { ids ->
@@ -157,7 +174,81 @@ internal fun IosChatDetailContent(
         formatTime = ::iosRelativeTime,
         formatDateHeader = ::iosDateHeader,
         onOpenPostLink = {},
-        onOpenGroupLink = onOpenGroupLink,
+        canEditMessage = { false },
+        canDeleteForEveryone = false,
+        requestBanner = {
+            requestState?.let { state ->
+                when {
+                    state.incoming && state.status == "pending" -> Card(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 12.dp, vertical = 8.dp)
+                    ) {
+                        Column(Modifier.padding(14.dp)) {
+                            Text("Message request", style = MaterialTheme.typography.titleSmall)
+                            Text(
+                                "This person wants to start a conversation. Accept to reply, or decline the request.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.padding(top = 3.dp)
+                            )
+                            Row(Modifier.padding(top = 8.dp)) {
+                                Button(
+                                    enabled = !requestActionBusy,
+                                    onClick = {
+                                        requestActionBusy = true
+                                        scope.launch {
+                                            runCatching { repository.acceptFriendRequest(chat.friendUid) }
+                                                .onSuccess { isFriendUser = true; requestState = null }
+                                                .onFailure { errorMessage = it.message ?: "Unable to accept request" }
+                                            requestActionBusy = false
+                                        }
+                                    }
+                                ) { Text("Accept") }
+                                Spacer(Modifier.width(8.dp))
+                                TextButton(
+                                    enabled = !requestActionBusy,
+                                    onClick = {
+                                        requestActionBusy = true
+                                        scope.launch {
+                                            runCatching { repository.rejectFriendRequest(chat.friendUid) }
+                                                .onSuccess { requestState = IosChatRequestState("rejected", incoming = false) }
+                                                .onFailure { errorMessage = it.message ?: "Unable to decline request" }
+                                            requestActionBusy = false
+                                        }
+                                    }
+                                ) { Text("Decline") }
+                            }
+                        }
+                    }
+                    state.status == "rejected" -> Card(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 12.dp, vertical = 8.dp)
+                    ) {
+                        Text(
+                            "Message request declined. You cannot send messages in this chat.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.error,
+                            modifier = Modifier.padding(12.dp)
+                        )
+                    }
+                    !state.incoming && state.status == "pending" -> Card(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 12.dp, vertical = 8.dp)
+                    ) {
+                        Text(
+                            "Message request sent. You can send one message until it is accepted.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(12.dp)
+                        )
+                    }
+                }
+            }
+        },
+        canSendMessages = !requestStateLoading && (isFriendUser || requestState == null),
         renderImage = { url, modifier, scale ->
             IosRemoteImage(url, modifier, scale)
         }
@@ -173,10 +264,12 @@ internal fun IosChatDetailContent(
     }
 }
 
+/* Retired iOS-only Firestore group chat UI. PureGroupsScreen is the shared
+   Supabase implementation used by both Android and iOS.
 @Composable
 internal fun IosGroupChatDetailContent(
     group: PureGroup,
-    repository: ChatRepository,
+    repository: IosChatRepository,
     onBack: () -> Unit,
     onInfoClick: () -> Unit,
     onOpenGroupLink: (GroupLinkPayload) -> Unit,
@@ -264,6 +357,7 @@ internal fun IosGroupChatDetailContent(
     }
 }
 
+*/
 @Composable
 internal fun IosAnnouncementDetailContent(
     announcementId: String,
@@ -338,8 +432,19 @@ internal fun IosAnnouncementDetailContent(
                 clipboard.setText(AnnotatedString(link))
             },
             onShareViaApp = {
-                clipboard.setText(AnnotatedString(link))
                 showShareDialog = false
+                val items = listOf(link)
+                val activityVC = platform.UIKit.UIActivityViewController(
+                    activityItems = items,
+                    applicationActivities = null
+                )
+                val rootVC = platform.UIKit.UIApplication.sharedApplication
+                    .keyWindow?.rootViewController
+                var presenter = rootVC
+                while (presenter?.presentedViewController != null) {
+                    presenter = presenter.presentedViewController
+                }
+                presenter?.presentViewController(activityVC, animated = true, completion = null)
             }
         )
     }
@@ -499,7 +604,12 @@ internal fun IosProfileContent(
         onSnapchatChange = { snapchat = it },
         linkedinLink = linkedin,
         onLinkedinChange = { linkedin = it },
-        onSocialClick = { _, _ -> },
+        onSocialClick = { kind, value ->
+            val url = iosSocialUrl(kind, value)
+            if (url == null || !openIosExternalUrl(url)) {
+                errorMessage = "Unable to open this social link."
+            }
+        },
         selectedTab = selectedTab,
         onTabSelected = { selectedTab = it },
         tabs = listOf("Details", "Posts"),
@@ -552,10 +662,11 @@ internal fun IosProfileContent(
     }
 }
 
+/* Retired iOS-only Firestore group info UI; see PureGroupsScreen.
 @Composable
 internal fun IosGroupInfoContent(
     group: PureGroup,
-    repository: ChatRepository,
+    repository: IosChatRepository,
     joinPreview: Boolean = false,
     linkPayload: GroupLinkPayload? = null,
     onBack: () -> Unit,
@@ -719,6 +830,7 @@ internal fun IosGroupInfoContent(
     }
 }
 
+*/
 internal fun iosRelativeTime(timestamp: Long): String {
     val diff = (currentTimeMillis() - timestamp).coerceAtLeast(0L)
     val minutes = diff / 60_000L

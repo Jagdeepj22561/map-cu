@@ -23,7 +23,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.unit.dp
-import com.example.shared.repository.IosFirebaseRest
+import com.example.shared.repository.IosAuthApi
 import com.example.shared.repository.IosPreferencesStore
 import com.example.shared.repository.IosUserProfile
 import com.example.shared.repository.IosUserStore
@@ -83,7 +83,7 @@ internal fun RegisterRoute(
                     loading = true
                     scope.launch {
                         runCatching {
-                            IosFirebaseRest.generateOtp(normalizedEmail)
+                            IosAuthApi.generateOtp(normalizedEmail)
                             otpSent = true
                             status = "OTP sent successfully"
                         }.onFailure { error ->
@@ -126,7 +126,7 @@ internal fun RegisterRoute(
                     loading = true
                     scope.launch {
                         runCatching {
-                            val session = IosFirebaseRest.verifyAndRegister(
+                            val session = IosAuthApi.verifyAndRegister(
                                 email = normalizedEmail,
                                 otp = otp.trim(),
                                 name = name.trim(),
