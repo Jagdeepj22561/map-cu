@@ -5,10 +5,9 @@ use_frameworks!
 
 target 'iosApp' do
   pod 'GoogleMaps'
-  pod 'FirebaseMessaging'
-  # Temporary legacy dependency: remaining iOS profile/chat paths still use Firestore.
-  # AnnouncementRepository itself no longer uses Firestore.
-  pod 'FirebaseFirestore'
+  pod 'FirebaseMessaging', '~> 10.29.0'
+  pod 'FirebaseCore', '~> 10.29.0'
+  pod 'FirebaseFirestore', '~> 10.29.0'
   pod 'shared', :path => '../shared'
 end
 

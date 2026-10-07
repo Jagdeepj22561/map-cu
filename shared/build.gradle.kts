@@ -64,8 +64,12 @@ kotlin {
             isStatic = true
         }
         pod("GoogleMaps")
-        pod("FirebaseCore")
-        pod("FirebaseFirestore")
+        pod("FirebaseCore") {
+            version = "~> 10.29.0"
+        }
+        pod("FirebaseFirestore") {
+            version = "~> 10.29.0"
+        }
     }
 
     iosX64 {
