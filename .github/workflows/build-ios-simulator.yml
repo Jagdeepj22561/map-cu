@@ -25,7 +25,7 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v4
 
-      - name: Setup Java 17
+      - name: Setup Java 17 & Cache Gradle
         uses: actions/setup-java@v4
         with:
           distribution: 'temurin'
@@ -38,28 +38,31 @@ jobs:
           # Ensure Gradle uses the installed Java 17 directly and never attempts to download via foojay
           rm -f gradle/gradle-daemon-jvm.properties
 
-      - name: Cache Kotlin/Native Artifacts
+      # Cache Kotlin/Native Toolchain (~1.5GB download: clang, sysroot, lld, libffi)
+      # Keyed solely by Kotlin version so code changes don't trigger re-downloads
+      - name: Cache Kotlin/Native Toolchain
         uses: actions/cache@v4
         with:
           path: ~/.konan
-          key: ${{ runner.os }}-konan-${{ hashFiles('gradle.properties', 'gradle/libs.versions.toml', 'shared/build.gradle.kts') }}
+          key: ${{ runner.os }}-konan-${{ hashFiles('gradle/libs.versions.toml') }}
           restore-keys: |
             ${{ runner.os }}-konan-
 
+      # Cache CocoaPods dependencies & download cache (GoogleMaps, Firebase)
       - name: Cache CocoaPods
         uses: actions/cache@v4
         with:
           path: |
             iosApp/Pods
             ~/Library/Caches/CocoaPods
-          key: ${{ runner.os }}-pods-${{ hashFiles('iosApp/Podfile', 'shared/shared.podspec', 'shared/build.gradle.kts') }}
+          key: ${{ runner.os }}-pods-${{ hashFiles('iosApp/Podfile') }}
           restore-keys: |
             ${{ runner.os }}-pods-
 
       # Step 1: Generate initial podspec and dummy framework so pod install recognizes the shared pod
       - name: Generate Shared KMP Pod Artifacts
         run: |
-          ./gradlew :shared:podspec :shared:generateDummyFramework --no-daemon
+          ./gradlew :shared:podspec :shared:generateDummyFramework --no-daemon --build-cache
 
       # Step 2: Install CocoaPods to download GoogleMaps, Firebase and create iosApp.xcworkspace
       - name: Install CocoaPods
@@ -74,7 +77,8 @@ jobs:
             -Pkotlin.native.cocoapods.platform=iphoneos \
             -Pkotlin.native.cocoapods.archs="arm64" \
             -Pkotlin.native.cocoapods.configuration=${{ github.event.inputs.build_configuration || 'Release' }} \
-            --no-daemon
+            --no-daemon \
+            --build-cache
 
       # Step 4: Build iOS app for physical device.
       # OVERRIDE_KOTLIN_BUILD_IDE_SUPPORTED=YES tells CocoaPods script phase in Xcode to skip re-running Gradle,
