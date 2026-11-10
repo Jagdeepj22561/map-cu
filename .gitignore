@@ -44,5 +44,3 @@ supabase/.temp/
 DerivedData/
 xcuserdata/
 app/google-services.json
-app/google-services.json
-iosApp/GoogleService-Info.plist
