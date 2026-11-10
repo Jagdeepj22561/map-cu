@@ -67,8 +67,10 @@ kotlin {
         pod("FirebaseCore") {
             version = "~> 10.29.0"
         }
-        pod("FirebaseFirestore") {
+        pod("FirebaseFirestoreInternal") {
             version = "~> 10.29.0"
+            packageName = "cocoapods.FirebaseFirestore"
+            extraOpts += listOf("-compiler-option", "-fmodules")
         }
     }
 

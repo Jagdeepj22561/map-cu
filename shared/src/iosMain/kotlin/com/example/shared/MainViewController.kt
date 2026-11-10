@@ -27,18 +27,21 @@ import platform.UIKit.UIViewController
 
 fun LoginViewController(
     onLogin: (String, String) -> Unit,
-    onRegister: () -> Unit
+    onRegister: () -> Unit,
+    onContinueAsGuest: () -> Unit = { onLogin("guest@example.com", "guest") }
 ): UIViewController = SafeComposeViewController(screenName = "Login") {
     LoginRoute(
         onLogin = onLogin,
-        onRegister = onRegister
+        onRegister = onRegister,
+        onContinueAsGuest = onContinueAsGuest
     )
 }
 
 @Composable
 internal fun LoginRoute(
     onLogin: (String, String) -> Unit,
-    onRegister: () -> Unit
+    onRegister: () -> Unit,
+    onContinueAsGuest: () -> Unit = { onLogin("guest@example.com", "guest") }
 ) {
     var email by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
@@ -93,6 +96,7 @@ internal fun LoginRoute(
                 }
             }
         },
+        onContinueAsGuest = onContinueAsGuest,
         onGoRegister = onRegister,
         onForgotPasswordClick = {
             val normalizedEmail = email.trim().lowercase()

@@ -8,6 +8,7 @@ target 'iosApp' do
   pod 'FirebaseMessaging', '~> 10.29.0'
   pod 'FirebaseCore', '~> 10.29.0'
   pod 'FirebaseFirestore', '~> 10.29.0'
+  pod 'FirebaseFirestoreInternal', '~> 10.29.0'
   pod 'shared', :path => '../shared'
 end
 
