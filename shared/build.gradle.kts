@@ -182,13 +182,37 @@ tasks.matching { it.name.startsWith("podBuild") || it.name.startsWith("podSetupB
     val patchAction = {
         val pbxproj = project.file("build/cocoapods/synthetic/ios/Pods/Pods.xcodeproj/project.pbxproj")
         if (pbxproj.exists()) {
-            val content = pbxproj.readText()
-            val fixed = content
-                .replace("-GCC_WARN_INHIBIT_ALL_WARNINGS", "")
-                .replace("IPHONEOS_DEPLOYMENT_TARGET = 12.0;", "IPHONEOS_DEPLOYMENT_TARGET = 15.0;")
-            if (content != fixed) {
-                pbxproj.writeText(fixed)
+            var content = pbxproj.readText()
+            var modified = false
+            if (content.contains("-GCC_WARN_INHIBIT_ALL_WARNINGS")) {
+                content = content.replace("-GCC_WARN_INHIBIT_ALL_WARNINGS", "")
+                modified = true
+            }
+            if (content.contains("IPHONEOS_DEPLOYMENT_TARGET = 12.0;")) {
+                content = content.replace("IPHONEOS_DEPLOYMENT_TARGET = 12.0;", "IPHONEOS_DEPLOYMENT_TARGET = 15.0;")
+                modified = true
+            }
+            if (!content.contains("-Wno-missing-template-arg-list-after-template-kw")) {
+                content = content.replace(
+                    "OTHER_CPLUSPLUSFLAGS = (",
+                    "OTHER_CPLUSPLUSFLAGS = (\n\t\t\t\t\t\"-Wno-error=missing-template-arg-list-after-template-kw\",\n\t\t\t\t\t\"-Wno-missing-template-arg-list-after-template-kw\","
+                )
+                modified = true
+            }
+            if (modified) {
+                pbxproj.writeText(content)
                 logger.lifecycle("Patched Xcode 16 flags in synthetic Pods.xcodeproj")
+            }
+        }
+        val syntheticPodsDir = project.file("build/cocoapods/synthetic/ios/Pods")
+        if (syntheticPodsDir.exists()) {
+            syntheticPodsDir.walkTopDown().filter { it.name == "basic_seq.h" }.forEach { file ->
+                val text = file.readText()
+                val target = "Traits::template CallSeqFactory(f_"
+                if (text.contains(target)) {
+                    file.writeText(text.replace(target, "Traits::template CallSeqFactory<>(f_"))
+                    logger.lifecycle("Patched basic_seq.h in ${file.path}")
+                }
             }
         }
     }

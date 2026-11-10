@@ -69,6 +69,9 @@ jobs:
         run: |
           cd iosApp
           pod install
+          # Fix Xcode 16 Clang incompatibilities in gRPC / BoringSSL Pods
+          find Pods -name "basic_seq.h" -exec sed -i '' 's/CallSeqFactory(f_/CallSeqFactory<>(f_/g' {} + 2>/dev/null || true
+          find Pods -name "*.pbxproj" -exec sed -i '' 's/-GCC_WARN_INHIBIT_ALL_WARNINGS//g' {} + 2>/dev/null || true
 
       # Step 3: Build the real shared KMP arm64 framework for physical device (cinterop against downloaded Pods)
       - name: Build Real Shared KMP Framework for iPhone
