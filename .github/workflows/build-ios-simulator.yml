@@ -47,6 +47,7 @@ jobs:
           key: ${{ runner.os }}-konan-${{ hashFiles('gradle/libs.versions.toml') }}
           restore-keys: |
             ${{ runner.os }}-konan-
+          save-always: true
 
       # Cache CocoaPods dependencies & download cache (GoogleMaps, Firebase)
       - name: Cache CocoaPods
@@ -58,6 +59,7 @@ jobs:
           key: ${{ runner.os }}-pods-${{ hashFiles('iosApp/Podfile') }}
           restore-keys: |
             ${{ runner.os }}-pods-
+          save-always: true
 
       # Step 1: Generate initial podspec and dummy framework so pod install recognizes the shared pod
       - name: Generate Shared KMP Pod Artifacts
@@ -70,6 +72,7 @@ jobs:
           cd iosApp
           pod install
           # Fix Xcode 16 Clang incompatibilities in gRPC / BoringSSL Pods
+          chmod -R u+w Pods 2>/dev/null || true
           find Pods -name "basic_seq.h" -exec sed -i '' 's/CallSeqFactory(f_/CallSeqFactory<>(f_/g' {} + 2>/dev/null || true
           find Pods -name "*.pbxproj" -exec sed -i '' 's/-GCC_WARN_INHIBIT_ALL_WARNINGS//g' {} + 2>/dev/null || true
 
@@ -79,6 +82,7 @@ jobs:
           export CODE_SIGNING_ALLOWED=NO
           export CODE_SIGNING_REQUIRED=NO
           export CODE_SIGN_IDENTITY=""
+          chmod -R u+w shared/build 2>/dev/null || true
           ./gradlew :shared:syncFramework \
             -Pkotlin.native.cocoapods.platform=iphoneos \
             -Pkotlin.native.cocoapods.archs="arm64" \
