@@ -177,3 +177,21 @@ val verifyKmpArchitecture by tasks.registering {
 tasks.matching { it.name == "check" }.configureEach {
     dependsOn(verifyKmpArchitecture)
 }
+
+tasks.matching { it.name.startsWith("podBuild") || it.name.startsWith("podSetupBuild") || it.name.startsWith("podInstallSynthetic") }.configureEach {
+    val patchAction = {
+        val pbxproj = project.file("build/cocoapods/synthetic/ios/Pods/Pods.xcodeproj/project.pbxproj")
+        if (pbxproj.exists()) {
+            val content = pbxproj.readText()
+            val fixed = content
+                .replace("-GCC_WARN_INHIBIT_ALL_WARNINGS", "")
+                .replace("IPHONEOS_DEPLOYMENT_TARGET = 12.0;", "IPHONEOS_DEPLOYMENT_TARGET = 15.0;")
+            if (content != fixed) {
+                pbxproj.writeText(fixed)
+                logger.lifecycle("Patched Xcode 16 flags in synthetic Pods.xcodeproj")
+            }
+        }
+    }
+    doFirst { patchAction() }
+    doLast { patchAction() }
+}
