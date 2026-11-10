@@ -161,6 +161,9 @@ struct LoginView: UIViewControllerRepresentable {
             },
             onRegister: {
                 onRegister()
+            },
+            onContinueAsGuest: {
+                onLogin("guest@example.com", "guest")
             }
         )
     }

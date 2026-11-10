@@ -27,8 +27,17 @@ import platform.UIKit.UIViewController
 
 fun LoginViewController(
     onLogin: (String, String) -> Unit,
+    onRegister: () -> Unit
+): UIViewController = LoginViewController(
+    onLogin = onLogin,
+    onRegister = onRegister,
+    onContinueAsGuest = { onLogin("guest@example.com", "guest") }
+)
+
+fun LoginViewController(
+    onLogin: (String, String) -> Unit,
     onRegister: () -> Unit,
-    onContinueAsGuest: () -> Unit = { onLogin("guest@example.com", "guest") }
+    onContinueAsGuest: () -> Unit
 ): UIViewController = SafeComposeViewController(screenName = "Login") {
     LoginRoute(
         onLogin = onLogin,
