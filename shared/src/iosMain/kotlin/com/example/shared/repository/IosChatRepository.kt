@@ -1,10 +1,11 @@
+@file:OptIn(kotlinx.cinterop.ExperimentalForeignApi::class)
+
 package com.example.shared.repository
 
 import cocoapods.FirebaseFirestore.FIRDocumentSnapshot
 import cocoapods.FirebaseFirestore.FIRQuerySnapshot
 import cocoapods.FirebaseFirestore.FIRDocumentChange
 import cocoapods.FirebaseFirestore.FIRDocumentChangeType
-import cocoapods.FirebaseFirestore.FIRSetOptions
 import cocoapods.FirebaseFirestore.FIRFieldValue
 import com.example.shared.GeoPoint
 import com.example.shared.data.EventNotificationClient
@@ -673,7 +674,7 @@ private object IosChatStore {
         if (normalized.isBlank()) return null
         val publicResult = suspendCancellableCoroutine<FIRQuerySnapshot?> { continuation ->
             IosFirestoreRefs.groups.queryWhereField("publicGroupId", isEqualTo = normalized)
-                .queryLimitedTo(1u)
+                .queryLimitedTo(1L)
                 .getDocumentsWithCompletion { snapshot, error ->
                     if (error != null) continuation.resumeWithException(Throwable(error.toString()))
                     else continuation.resume(snapshot)
@@ -684,7 +685,7 @@ private object IosChatStore {
         } else {
             suspendCancellableCoroutine<FIRQuerySnapshot?> { continuation ->
                 IosFirestoreRefs.groups.queryWhereField("inviteCode", isEqualTo = normalized)
-                    .queryLimitedTo(1u)
+                    .queryLimitedTo(1L)
                     .getDocumentsWithCompletion { snapshot, error ->
                         if (error != null) continuation.resumeWithException(Throwable(error.toString()))
                         else continuation.resume(snapshot)
@@ -718,7 +719,7 @@ private object IosChatStore {
             }
         }
         val latestData = latestGroup?.data()?.asStringMap().orEmpty()
-        val members = latestData["members"].asStringMap()
+        val members = latestData["members"].asStringMap().orEmpty()
         if (members.containsKey(uid)) {
             suspendCancellableCoroutine<Unit> { continuation ->
                 IosFirestoreRefs.userGroups(uid).documentWithPath(group.groupId)
@@ -1160,7 +1161,7 @@ private object IosChatStore {
             }
         }
         val latestData = latestGroup?.data()?.asStringMap().orEmpty()
-        val members = latestData["members"].asStringMap()
+        val members = latestData["members"].asStringMap().orEmpty()
         val nextCount = if (members.containsKey(uid)) {
             (members.size - 1).coerceAtLeast(0)
         } else {
@@ -1191,7 +1192,7 @@ private object IosChatStore {
     private suspend fun ensureIosGroupCodeAvailable(publicId: String) {
         val existing = suspendCancellableCoroutine<FIRQuerySnapshot?> { continuation ->
             IosFirestoreRefs.groups.queryWhereField("publicGroupId", isEqualTo = publicId)
-                .queryLimitedTo(1u)
+                .queryLimitedTo(1L)
                 .getDocumentsWithCompletion { snapshot, error ->
                     if (error != null) continuation.resumeWithException(Throwable(error.toString()))
                     else continuation.resume(snapshot)

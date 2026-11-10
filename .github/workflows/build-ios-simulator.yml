@@ -39,19 +39,19 @@ jobs:
           rm -f gradle/gradle-daemon-jvm.properties
 
       # Cache Kotlin/Native Toolchain (~1.5GB download: clang, sysroot, lld, libffi)
-      # Keyed solely by Kotlin version so code changes don't trigger re-downloads
-      - name: Cache Kotlin/Native Toolchain
-        uses: actions/cache@v4
+      - name: Restore Kotlin/Native Toolchain
+        id: restore-konan
+        uses: actions/cache/restore@v4
         with:
           path: ~/.konan
           key: ${{ runner.os }}-konan-${{ hashFiles('gradle/libs.versions.toml') }}
           restore-keys: |
             ${{ runner.os }}-konan-
-          save-always: true
 
       # Cache CocoaPods dependencies & download cache (GoogleMaps, Firebase)
-      - name: Cache CocoaPods
-        uses: actions/cache@v4
+      - name: Restore CocoaPods
+        id: restore-pods
+        uses: actions/cache/restore@v4
         with:
           path: |
             iosApp/Pods
@@ -59,7 +59,6 @@ jobs:
           key: ${{ runner.os }}-pods-${{ hashFiles('iosApp/Podfile') }}
           restore-keys: |
             ${{ runner.os }}-pods-
-          save-always: true
 
       # Step 1: Generate initial podspec and dummy framework so pod install recognizes the shared pod
       - name: Generate Shared KMP Pod Artifacts
@@ -76,6 +75,15 @@ jobs:
           find Pods -name "basic_seq.h" -exec sed -i '' 's/CallSeqFactory(f_/CallSeqFactory<>(f_/g' {} + 2>/dev/null || true
           find Pods -name "*.pbxproj" -exec sed -i '' 's/-GCC_WARN_INHIBIT_ALL_WARNINGS//g' {} + 2>/dev/null || true
 
+      - name: Save CocoaPods Cache
+        if: always() && steps.restore-pods.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            iosApp/Pods
+            ~/Library/Caches/CocoaPods
+          key: ${{ steps.restore-pods.outputs.cache-primary-key || format('{0}-pods-{1}', runner.os, hashFiles('iosApp/Podfile')) }}
+
       # Step 3: Build the real shared KMP arm64 framework for physical device (cinterop against downloaded Pods)
       - name: Build Real Shared KMP Framework for iPhone
         run: |
@@ -89,6 +97,13 @@ jobs:
             -Pkotlin.native.cocoapods.configuration=${{ github.event.inputs.build_configuration || 'Release' }} \
             --no-daemon \
             --build-cache
+
+      - name: Save Kotlin/Native Toolchain
+        if: always() && steps.restore-konan.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ~/.konan
+          key: ${{ steps.restore-konan.outputs.cache-primary-key || format('{0}-konan-{1}', runner.os, hashFiles('gradle/libs.versions.toml')) }}
 
       # Step 4: Build iOS app for physical device.
       # OVERRIDE_KOTLIN_BUILD_IDE_SUPPORTED=YES tells CocoaPods script phase in Xcode to skip re-running Gradle,

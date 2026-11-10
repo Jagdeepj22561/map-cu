@@ -8,7 +8,6 @@ import cocoapods.FirebaseFirestore.FIRFirestore
 import cocoapods.FirebaseFirestore.FIRCollectionReference
 import cocoapods.FirebaseFirestore.FIRQuery
 import cocoapods.FirebaseFirestore.FIRFieldValue
-import cocoapods.FirebaseFirestore.FIRSetOptions
 import com.example.shared.GeoPoint
 import com.example.shared.Place
 import com.example.shared.PlaceCategory
