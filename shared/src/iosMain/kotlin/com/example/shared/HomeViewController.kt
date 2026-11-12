@@ -201,6 +201,7 @@ internal fun HomeRoute(
     var distanceLeft by remember { mutableStateOf(0f) }
     var errorMessage by remember { mutableStateOf<String?>(null) }
     var showDebugLog by remember { mutableStateOf(false) }
+    var recenterTrigger by remember { mutableIntStateOf(0) }
     val localPlaces = remember { IosLocalDatabaseStore.loadPlaces() }
     val localRoutes = remember { IosLocalDatabaseStore.loadRoutes() }
     val baseMapPlaces = if (localPlaces.isNotEmpty()) localPlaces else campusPlaces
@@ -624,6 +625,7 @@ internal fun HomeRoute(
                             },
                             onRecenter = {
                                 currentLocation = liveLocation ?: currentUser?.location ?: currentLocation
+                                recenterTrigger++
                             },
                             onStopNavigation = {
                                 isNavigating = false
@@ -642,7 +644,8 @@ internal fun HomeRoute(
                                         selectedPlace = place
                                     },
                                     onMapTap = { selectedPlace = null },
-                                    onZoomChanged = { zoom -> mapZoom = zoom }
+                                    onZoomChanged = { zoom -> mapZoom = zoom },
+                                    recenterTrigger = recenterTrigger
                                 )
                             },
                             renderDirectionsIcon = { Icon(Icons.Default.Directions, contentDescription = null) },
@@ -1088,7 +1091,8 @@ internal fun IosMapKitView(
     isNavigating: Boolean,
     onPlaceSelected: (Place) -> Unit,
     onMapTap: () -> Unit,
-    onZoomChanged: (Float) -> Unit
+    onZoomChanged: (Float) -> Unit,
+    recenterTrigger: Int = 0
 ) {
     val latestPlaces by androidx.compose.runtime.rememberUpdatedState(places)
     val latestLocation by androidx.compose.runtime.rememberUpdatedState(currentLocation)
@@ -1099,18 +1103,32 @@ internal fun IosMapKitView(
     val latestOnMapTap by androidx.compose.runtime.rememberUpdatedState(onMapTap)
     val latestOnZoomChanged by androidx.compose.runtime.rememberUpdatedState(onZoomChanged)
 
+    // Maintain a strong reference to the delegate in Compose state so Kotlin/Native GC
+    // does not deallocate it while MapKit's weak delegate property is holding it!
+    val delegate = remember {
+        CampusMapDelegate(
+            onPlaceSelected = { latestOnPlaceSelected(it) },
+            onMapTap = { latestOnMapTap() },
+            onZoomChanged = { latestOnZoomChanged(it) }
+        )
+    }
+
+    var lastCenteredPlaceName by remember { mutableStateOf<String?>(null) }
+    var lastRecenterCount by remember { mutableIntStateOf(0) }
+    var lastNavigatingState by remember { mutableStateOf(false) }
+
     UIKitView(
         modifier = Modifier.fillMaxSize(),
         factory = {
             runCatching {
                 val mapView = MKMapView()
-                val delegate = CampusMapDelegate(
-                    onPlaceSelected = { latestOnPlaceSelected(it) },
-                    onMapTap = { latestOnMapTap() }
-                )
+                delegate.onPlaceSelected = { latestOnPlaceSelected(it) }
+                delegate.onMapTap = { latestOnMapTap() }
+                delegate.onZoomChanged = { latestOnZoomChanged(it) }
                 delegate.placeLookup = latestPlaces.associateBy { it.name }
                 mapView.delegate = delegate
                 mapView.showsUserLocation = true
+
                 val initialCenter = CLLocationCoordinate2DMake(campusCenterLatitude, campusCenterLongitude)
                 val initialRegion = MKCoordinateRegionMakeWithDistance(initialCenter, 900.0, 900.0)
                 mapView.setRegion(initialRegion, animated = false)
@@ -1123,18 +1141,56 @@ internal fun IosMapKitView(
         update = { view ->
             val mapView = view as? MKMapView ?: return@UIKitView
             runCatching {
-                val delegate = mapView.delegate as? CampusMapDelegate
-                delegate?.placeLookup = latestPlaces.associateBy { it.name }
-                delegate?.onPlaceSelected = { latestOnPlaceSelected(it) }
-                delegate?.onMapTap = { latestOnMapTap() }
-                syncMapAnnotations(
+                delegate.onPlaceSelected = { latestOnPlaceSelected(it) }
+                delegate.onMapTap = { latestOnMapTap() }
+                delegate.onZoomChanged = { latestOnZoomChanged(it) }
+                delegate.placeLookup = latestPlaces.associateBy { it.name }
+                mapView.delegate = delegate
+
+                // Safely update placed annotations without ever touching MKUserLocation
+                delegate.syncAnnotations(mapView, latestPlaces)
+
+                // Overlays
+                syncRouteOverlay(
                     mapView = mapView,
-                    places = latestPlaces,
                     currentLocation = latestLocation,
-                    selectedPlace = latestSelectedPlace,
                     activeRoute = latestActiveRoute,
                     isNavigating = latestIsNavigating
                 )
+
+                // Only move camera on deliberate state transitions (selection, navigation, or recenter)
+                val selectedName = latestSelectedPlace?.name
+                if (selectedName != null && selectedName != lastCenteredPlaceName) {
+                    lastCenteredPlaceName = selectedName
+                    val targetPlace = latestSelectedPlace!!
+                    val center = CLLocationCoordinate2DMake(targetPlace.latitude, targetPlace.longitude)
+                    val region = MKCoordinateRegionMakeWithDistance(center, 400.0, 400.0)
+                    mapView.setRegion(region, animated = true)
+                } else if (selectedName == null) {
+                    lastCenteredPlaceName = null
+                }
+
+                if (recenterTrigger != lastRecenterCount) {
+                    lastRecenterCount = recenterTrigger
+                    val target = if (isPointInsideCampus(latestLocation)) {
+                        latestLocation
+                    } else {
+                        GeoPoint(campusCenterLatitude, campusCenterLongitude)
+                    }
+                    val center = CLLocationCoordinate2DMake(target.lat, target.lng)
+                    val region = MKCoordinateRegionMakeWithDistance(center, 800.0, 800.0)
+                    mapView.setRegion(region, animated = true)
+                }
+
+                if (latestIsNavigating && latestActiveRoute != null) {
+                    if (!lastNavigatingState) {
+                        lastNavigatingState = true
+                        val region = routeFocusRegion(latestLocation, latestActiveRoute!!)
+                        mapView.setRegion(region, animated = true)
+                    }
+                } else {
+                    lastNavigatingState = false
+                }
             }.onFailure { error ->
                 println("MKMapView update failed: ${error.message}")
             }
@@ -1142,72 +1198,9 @@ internal fun IosMapKitView(
         onRelease = { view ->
             val mapView = view as? MKMapView
             mapView?.delegate = null
+            delegate.cleanup(mapView)
         }
     )
-}
-
-internal fun syncMapAnnotations(
-    mapView: MKMapView,
-    places: List<Place>,
-    currentLocation: GeoPoint,
-    selectedPlace: Place?,
-    activeRoute: Route?,
-    isNavigating: Boolean
-) {
-    val rawAnnotations = mapView.annotations ?: emptyList<Any?>()
-    val existingAnnotations = rawAnnotations
-        .filterIsInstance<MKAnnotationProtocol>()
-        .filterNot { it is MKUserLocation }
-
-    val currentTitles = existingAnnotations.mapNotNull { it.title }.toSet()
-    val newTitles = places.map { it.name }.toSet()
-    if (currentTitles != newTitles) {
-        if (existingAnnotations.isNotEmpty()) {
-            mapView.removeAnnotations(existingAnnotations)
-        }
-        val annotations = places.map { place ->
-            val annotation = MKPointAnnotation()
-            annotation.setTitle(place.name)
-            annotation.setSubtitle(place.category.name.lowercase())
-            annotation.setCoordinate(CLLocationCoordinate2DMake(place.latitude, place.longitude))
-            annotation
-        }
-        if (annotations.isNotEmpty()) {
-            mapView.addAnnotations(annotations)
-        }
-    }
-
-    syncRouteOverlay(
-        mapView = mapView,
-        currentLocation = currentLocation,
-        activeRoute = activeRoute,
-        isNavigating = isNavigating
-    )
-
-    val clampedRegion = if (isNavigating && activeRoute != null) {
-        routeFocusRegion(
-            currentLocation = currentLocation,
-            route = activeRoute
-        )
-    } else {
-        val mapCenter = selectedPlace?.let { GeoPoint(it.latitude, it.longitude) } ?: currentLocation
-        val desiredRegion = MKCoordinateRegionMakeWithDistance(
-            centerCoordinate = CLLocationCoordinate2DMake(mapCenter.lat, mapCenter.lng),
-            latitudinalMeters = 900.0,
-            longitudinalMeters = 900.0
-        )
-        desiredRegion.useContents {
-            campusClampedRegion(
-                centerLat = mapCenter.lat,
-                centerLng = mapCenter.lng,
-                latitudeDelta = span.latitudeDelta,
-                longitudeDelta = span.longitudeDelta
-            )
-        }
-    }
-    if (!mapRegionApproximatelyEquals(mapView, clampedRegion)) {
-        mapView.setRegion(clampedRegion, animated = true)
-    }
 }
 
 internal fun syncRouteOverlay(
@@ -1216,20 +1209,13 @@ internal fun syncRouteOverlay(
     activeRoute: Route?,
     isNavigating: Boolean
 ) {
-    val rawOverlays = mapView.overlays ?: emptyList<Any?>()
-    val existingOverlays = rawOverlays.filterIsInstance<MKOverlayProtocol>()
-    if (existingOverlays.isNotEmpty()) {
-        mapView.removeOverlays(existingOverlays)
+    runCatching {
+        val rawOverlays = mapView.overlays ?: emptyList<Any?>()
+        val existingOverlays = rawOverlays.filterIsInstance<MKOverlayProtocol>()
+        if (existingOverlays.isNotEmpty()) {
+            mapView.removeOverlays(existingOverlays)
+        }
     }
-
-    if (!isNavigating || activeRoute == null) return
-
-    val routePoints = remainingRoutePoints(currentLocation, activeRoute)
-    if (routePoints.size < 2) return
-
-    // Skip drawing the polyline for now; the current iOS simulator toolchain is
-    // rejecting CLLocationCoordinate2D array interop even though the rest of
-    // navigation remains functional.
 }
 
 internal fun remainingRoutePoints(
@@ -1275,16 +1261,56 @@ internal fun routeBoundingRegion(points: List<GeoPoint>) = if (points.isEmpty())
 
 internal class CampusMapDelegate(
     var onPlaceSelected: (Place) -> Unit,
-    var onMapTap: () -> Unit = {}
+    var onMapTap: () -> Unit = {},
+    var onZoomChanged: (Float) -> Unit = {}
 ) : NSObject(), MKMapViewDelegateProtocol {
-    private var isApplyingCampusConstraint = false
     var placeLookup: Map<String, Place> = emptyMap()
+    private var placedAnnotations: List<MKPointAnnotation> = emptyList()
+
+    fun syncAnnotations(mapView: MKMapView, places: List<Place>) {
+        runCatching {
+            val currentTitles = placedAnnotations.mapNotNull { it.title }.toSet()
+            val newTitles = places.map { it.name }.toSet()
+            if (currentTitles == newTitles && placedAnnotations.size == places.size) {
+                return
+            }
+
+            if (placedAnnotations.isNotEmpty()) {
+                mapView.removeAnnotations(placedAnnotations)
+                placedAnnotations = emptyList()
+            }
+
+            val newAnnotations = places.map { place ->
+                MKPointAnnotation().apply {
+                    setTitle(place.name)
+                    setSubtitle(place.category.name.lowercase())
+                    setCoordinate(CLLocationCoordinate2DMake(place.latitude, place.longitude))
+                }
+            }
+            if (newAnnotations.isNotEmpty()) {
+                mapView.addAnnotations(newAnnotations)
+                placedAnnotations = newAnnotations
+            }
+        }
+    }
+
+    fun cleanup(mapView: MKMapView?) {
+        runCatching {
+            if (placedAnnotations.isNotEmpty() && mapView != null) {
+                mapView.removeAnnotations(placedAnnotations)
+            }
+            placedAnnotations = emptyList()
+        }
+    }
 
     override fun mapView(
         mapView: MKMapView,
         viewForAnnotation: MKAnnotationProtocol
     ): MKAnnotationView? {
-        if (viewForAnnotation is MKUserLocation) return null
+        // ALWAYS return null for user location so Apple's default pulsing blue dot is used
+        if (viewForAnnotation == mapView.userLocation || viewForAnnotation is MKUserLocation) {
+            return null
+        }
 
         val reuseId = "campus-place"
         val markerView = (mapView.dequeueReusableAnnotationViewWithIdentifier(reuseId) as? MKMarkerAnnotationView)
@@ -1297,6 +1323,8 @@ internal class CampusMapDelegate(
         val place = if (title != null) placeLookup[title] else null
         if (place != null) {
             markerView.glyphText = iosMarkerEmoji(place.category)
+        } else {
+            markerView.glyphText = null
         }
         return markerView
     }
@@ -1316,7 +1344,9 @@ internal class CampusMapDelegate(
         mapView: MKMapView,
         didSelectAnnotationView: MKAnnotationView
     ) {
-        val title = didSelectAnnotationView.annotation?.title ?: return
+        val annotation = didSelectAnnotationView.annotation ?: return
+        if (annotation == mapView.userLocation || annotation is MKUserLocation) return
+        val title = annotation.title ?: return
         val place = placeLookup[title] ?: return
         onPlaceSelected(place)
     }
@@ -1325,21 +1355,13 @@ internal class CampusMapDelegate(
         mapView: MKMapView,
         regionDidChangeAnimated: Boolean
     ) {
-        if (isApplyingCampusConstraint) return
-
-        val clampedRegion = mapView.region.useContents {
-            campusClampedRegion(
-                centerLat = center.latitude,
-                centerLng = center.longitude,
-                latitudeDelta = span.latitudeDelta,
-                longitudeDelta = span.longitudeDelta
-            )
-        }
-
-        if (!mapRegionApproximatelyEquals(mapView, clampedRegion)) {
-            isApplyingCampusConstraint = true
-            mapView.setRegion(clampedRegion, animated = false)
-            isApplyingCampusConstraint = false
+        // NEVER call mapView.setRegion inside regionDidChangeAnimated (causes infinite recursion / crash)
+        runCatching {
+            val span = mapView.region.useContents { span.latitudeDelta }
+            if (span > 0.0) {
+                val approxZoom = (kotlin.math.ln(360.0 / span) / kotlin.math.ln(2.0)).toFloat()
+                onZoomChanged(approxZoom)
+            }
         }
     }
 }
