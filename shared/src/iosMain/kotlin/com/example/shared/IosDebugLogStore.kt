@@ -94,6 +94,7 @@ fun iosClearLastCrashLog() {
     }
 }
 
+@OptIn(kotlin.experimental.ExperimentalNativeApi::class)
 fun initGlobalExceptionHandler() {
     runCatching {
         setUnhandledExceptionHook { throwable ->

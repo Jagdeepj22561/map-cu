@@ -79,16 +79,7 @@ internal fun SafeComposeContainer(
             }
         )
     } else {
-        var contentFailed by remember { mutableStateOf(false) }
-        if (!contentFailed) {
-            try {
-                content()
-            } catch (t: Throwable) {
-                contentFailed = true
-                localError = t
-                IosInAppDebugLogStore.log("Caught exception in $screenName Compose tree: ${t.message}")
-            }
-        }
+        content()
     }
 }
 
