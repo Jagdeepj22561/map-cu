@@ -1,7 +1,6 @@
 import SwiftUI
 import FirebaseCore
 import FirebaseMessaging
-import GoogleMaps
 import shared
 import UIKit
 import UserNotifications
@@ -94,7 +93,6 @@ struct iOSApp: App {
         if FirebaseApp.app() == nil {
             FirebaseApp.configure()
         }
-        GMSServices.provideAPIKey("AIzaSyBRVnIMWpOxVIXpzK54xestTg175gm23JY")
     }
 
     var body: some Scene {
@@ -149,9 +147,16 @@ struct iOSApp: App {
 
     private func syncNotificationToken() {
         guard !IosPlatformSupportKt.iosCurrentSessionUid().isEmpty else { return }
-        Messaging.messaging().token { token, _ in
-            guard let token, !token.isEmpty else { return }
-            syncFcmTokenToSupabase(token)
+        guard FirebaseApp.app() != nil else { return }
+        DispatchQueue.main.async {
+            Messaging.messaging().token { token, error in
+                if let error = error {
+                    print("Firebase token error: \(error.localizedDescription)")
+                    return
+                }
+                guard let token = token, !token.isEmpty else { return }
+                syncFcmTokenToSupabase(token)
+            }
         }
     }
 

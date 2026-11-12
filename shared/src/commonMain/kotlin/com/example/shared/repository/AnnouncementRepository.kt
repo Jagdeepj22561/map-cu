@@ -63,23 +63,27 @@ class AnnouncementRepository : IAnnouncementRepository {
 
     override fun getAnnouncementsFlow(): Flow<List<Announcement>> = flow {
         while (currentCoroutineContext().isActive) {
-            emit(loadAnnouncements())
+            val items = runCatching { loadAnnouncements() }.getOrDefault(emptyList())
+            emit(items)
             delay(FEED_REFRESH_MS)
         }
     }
 
     override suspend fun getAnnouncement(id: String): Announcement? {
-        return client.from("announcements")
-            .select {
-                filter { eq("id", id) }
-            }
-            .decodeSingleOrNull<AnnouncementRow>()
-            ?.toModel()
+        return runCatching {
+            client.from("announcements")
+                .select {
+                    filter { eq("id", id) }
+                }
+                .decodeSingleOrNull<AnnouncementRow>()
+                ?.toModel()
+        }.getOrNull()
     }
 
     override fun getAnnouncementFlow(id: String): Flow<Announcement?> = flow {
         while (currentCoroutineContext().isActive) {
-            emit(getAnnouncement(id))
+            val item = runCatching { getAnnouncement(id) }.getOrNull()
+            emit(item)
             delay(FEED_REFRESH_MS)
         }
     }

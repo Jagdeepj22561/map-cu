@@ -78,13 +78,6 @@ import kotlinx.cinterop.memScoped
 import kotlinx.cinterop.readValue
 import kotlinx.cinterop.useContents
 import kotlinx.coroutines.launch
-import cocoapods.GoogleMaps.GMSCameraPosition
-import cocoapods.GoogleMaps.GMSMapStyle
-import cocoapods.GoogleMaps.GMSMapViewDelegateProtocol
-import cocoapods.GoogleMaps.GMSMapView
-import cocoapods.GoogleMaps.GMSMarker
-import cocoapods.GoogleMaps.GMSMutablePath
-import cocoapods.GoogleMaps.GMSPolyline
 import platform.CoreLocation.CLLocation
 import platform.CoreLocation.CLLocationCoordinate2DMake
 import platform.CoreLocation.CLLocationManager
@@ -228,19 +221,19 @@ internal fun HomeRoute(
 
     LaunchedEffect(Unit) {
         runCatching { IosAuthApi.restoreSharedSession() }
-        chatRepository.startSync()
+        runCatching { chatRepository.startSync() }
         runCatching { IosUserStore.refreshCurrentUser() }
         currentLocation = currentUser?.location ?: defaultLocation
     }
 
     DisposableEffect(currentScreen == PureAppScreen.MAP) {
         if (currentScreen == PureAppScreen.MAP) {
-            IosLocationService.start()
+            runCatching { IosLocationService.start() }
         } else {
-            IosLocationService.stop()
+            runCatching { IosLocationService.stop() }
         }
         onDispose {
-            IosLocationService.stop()
+            runCatching { IosLocationService.stop() }
         }
     }
 
@@ -1030,45 +1023,57 @@ internal object IosLocationService {
     val location: kotlinx.coroutines.flow.StateFlow<GeoPoint?> = _location
 
     init {
-        manager.delegate = delegate
-        manager.desiredAccuracy = kCLLocationAccuracyBest
-        manager.distanceFilter = 5.0
+        runCatching {
+            manager.delegate = delegate
+            manager.desiredAccuracy = kCLLocationAccuracyBest
+            manager.distanceFilter = 5.0
+        }
     }
 
     fun start() {
-        when (CLLocationManager.authorizationStatus()) {
-            kCLAuthorizationStatusAuthorizedAlways,
-            kCLAuthorizationStatusAuthorizedWhenInUse -> manager.startUpdatingLocation()
-            kCLAuthorizationStatusNotDetermined -> manager.requestWhenInUseAuthorization()
+        runCatching {
+            when (CLLocationManager.authorizationStatus()) {
+                kCLAuthorizationStatusAuthorizedAlways,
+                kCLAuthorizationStatusAuthorizedWhenInUse -> manager.startUpdatingLocation()
+                kCLAuthorizationStatusNotDetermined -> manager.requestWhenInUseAuthorization()
+            }
+            manager.location?.let { publish(it) }
         }
-        manager.location?.let { publish(it) }
     }
 
     fun stop() {
-        manager.stopUpdatingLocation()
+        runCatching {
+            manager.stopUpdatingLocation()
+        }
     }
 
     private fun publish(location: CLLocation) {
-        val coordinate = location.coordinate
-        _location.value = coordinate.useContents { GeoPoint(latitude, longitude) }
+        runCatching {
+            val coordinate = location.coordinate
+            _location.value = coordinate.useContents { GeoPoint(latitude, longitude) }
+        }
     }
 
     private class LocationDelegate : NSObject(), CLLocationManagerDelegateProtocol {
         override fun locationManager(manager: CLLocationManager, didUpdateLocations: List<*>) {
-            val latest = didUpdateLocations.lastOrNull() as? CLLocation ?: return
-            publish(latest)
+            runCatching {
+                val latest = didUpdateLocations.lastOrNull() as? CLLocation ?: return
+                publish(latest)
+            }
         }
 
         override fun locationManager(manager: CLLocationManager, didFailWithError: NSError) {
         }
 
         override fun locationManagerDidChangeAuthorization(manager: CLLocationManager) {
-            val status = CLLocationManager.authorizationStatus()
-            if (status == kCLAuthorizationStatusAuthorizedAlways ||
-                status == kCLAuthorizationStatusAuthorizedWhenInUse
-            ) {
-                manager.startUpdatingLocation()
-                manager.location?.let { publish(it) }
+            runCatching {
+                val status = CLLocationManager.authorizationStatus()
+                if (status == kCLAuthorizationStatusAuthorizedAlways ||
+                    status == kCLAuthorizationStatusAuthorizedWhenInUse
+                ) {
+                    manager.startUpdatingLocation()
+                    manager.location?.let { publish(it) }
+                }
             }
         }
     }
@@ -1097,106 +1102,46 @@ internal fun IosMapKitView(
     UIKitView(
         modifier = Modifier.fillMaxSize(),
         factory = {
-            val camera = GMSCameraPosition.cameraWithLatitude(
-                latitude = campusCenterLatitude,
-                longitude = campusCenterLongitude,
-                zoom = campusOverviewZoom
-            )
-            val mapView = GMSMapView.mapWithFrame(
-                frame = CGRectZero.readValue(),
-                camera = camera
-            )
-            mapView.myLocationEnabled = true
-            mapView.mapStyle = iosCampusMapStyle()
-            mapView.delegate = IosGoogleMapDelegate(
-                onPlaceSelected = { latestOnPlaceSelected(it) },
-                onMapTap = { latestOnMapTap() },
-                onZoomChanged = { latestOnZoomChanged(it) }
-            )
-            mapView
-        },
-        update = { mapView ->
-            val delegate = mapView.delegate as? IosGoogleMapDelegate
-            val selectedPlace = latestSelectedPlace
-            delegate?.placeLookup = latestPlaces.associateBy { it.name }
-            delegate?.onPlaceSelected = { latestOnPlaceSelected(it) }
-            delegate?.onMapTap = { latestOnMapTap() }
-            delegate?.onZoomChanged = { latestOnZoomChanged(it) }
-
-            when {
-                selectedPlace != null -> mapView.camera = GMSCameraPosition.cameraWithLatitude(
-                    latitude = selectedPlace.latitude,
-                    longitude = selectedPlace.longitude,
-                    zoom = 17f
+            runCatching {
+                val mapView = MKMapView()
+                val delegate = CampusMapDelegate(
+                    onPlaceSelected = { latestOnPlaceSelected(it) },
+                    onMapTap = { latestOnMapTap() }
                 )
-                latestIsNavigating && isPointInsideCampus(latestLocation) -> mapView.camera = GMSCameraPosition.cameraWithLatitude(
-                    latitude = latestLocation.lat,
-                    longitude = latestLocation.lng,
-                    zoom = 16.5f
-                )
-            }
-            mapView.myLocationEnabled = true
-            mapView.mapStyle = iosCampusMapStyle()
-            mapView.clear()
-
-            latestPlaces.forEach { place ->
-                val marker = GMSMarker()
-                marker.position = CLLocationCoordinate2DMake(place.latitude, place.longitude)
-                marker.title = place.name
-                marker.snippet = place.category.name.lowercase()
-                marker.iconView = iosMarkerView(place)
-                marker.map = mapView
-            }
-
-            val activeRoute = latestActiveRoute
-            if (latestIsNavigating && activeRoute != null) {
-                val remainingPoints = remainingRoutePoints(latestLocation, activeRoute)
-                val path = GMSMutablePath()
-                remainingPoints.forEach { point ->
-                    path.addLatitude(point.lat, longitude = point.lng)
-                }
-                val polyline = GMSPolyline()
-                polyline.path = path
-                polyline.strokeWidth = 12.0
-                polyline.strokeColor = UIColor.redColor
-                polyline.map = mapView
+                mapView.delegate = delegate
+                mapView.showsUserLocation = true
+                val initialCenter = CLLocationCoordinate2DMake(campusCenterLatitude, campusCenterLongitude)
+                val initialRegion = MKCoordinateRegionMakeWithDistance(initialCenter, 900.0, 900.0)
+                mapView.setRegion(initialRegion, animated = false)
+                mapView
+            }.getOrElse { error ->
+                println("MKMapView factory failed: ${error.message}")
+                UIView()
             }
         },
-        onRelease = { mapView ->
-            mapView.delegate = null
+        update = { view ->
+            val mapView = view as? MKMapView ?: return@UIKitView
+            runCatching {
+                val delegate = mapView.delegate as? CampusMapDelegate
+                delegate?.onPlaceSelected = { latestOnPlaceSelected(it) }
+                delegate?.onMapTap = { latestOnMapTap() }
+                syncMapAnnotations(
+                    mapView = mapView,
+                    places = latestPlaces,
+                    currentLocation = latestLocation,
+                    selectedPlace = latestSelectedPlace,
+                    activeRoute = latestActiveRoute,
+                    isNavigating = latestIsNavigating
+                )
+            }.onFailure { error ->
+                println("MKMapView update failed: ${error.message}")
+            }
+        },
+        onRelease = { view ->
+            val mapView = view as? MKMapView
+            mapView?.delegate = null
         }
     )
-}
-
-internal class IosGoogleMapDelegate(
-    var placeLookup: Map<String, Place> = emptyMap(),
-    var onPlaceSelected: (Place) -> Unit,
-    var onMapTap: () -> Unit,
-    var onZoomChanged: (Float) -> Unit
-) : NSObject(), GMSMapViewDelegateProtocol {
-    override fun mapView(
-        mapView: GMSMapView,
-        didChangeCameraPosition: GMSCameraPosition
-    ) {
-        onZoomChanged(didChangeCameraPosition.zoom.toFloat())
-    }
-
-    override fun mapView(
-        mapView: GMSMapView,
-        didTapMarker: GMSMarker
-    ): Boolean {
-        val title = didTapMarker.title ?: return false
-        val place = placeLookup[title] ?: return false
-        onPlaceSelected(place)
-        return false
-    }
-
-    override fun mapView(
-        mapView: GMSMapView,
-        didTapAtCoordinate: kotlinx.cinterop.CValue<platform.CoreLocation.CLLocationCoordinate2D>
-    ) {
-        onMapTap()
-    }
 }
 
 internal fun syncMapAnnotations(
@@ -1210,13 +1155,16 @@ internal fun syncMapAnnotations(
     val existingAnnotations = mapView.annotations
         .filterIsInstance<MKAnnotationProtocol>()
         .filterNot { it is MKUserLocation }
-    if (existingAnnotations.isNotEmpty()) {
-        mapView.removeAnnotations(existingAnnotations)
-    }
-
-    val annotations = places.map { place -> CampusPlaceAnnotation(place) }
-    if (annotations.isNotEmpty()) {
-        mapView.addAnnotations(annotations)
+    val currentTitles = existingAnnotations.mapNotNull { it.title }.toSet()
+    val newTitles = places.map { it.name }.toSet()
+    if (currentTitles != newTitles) {
+        if (existingAnnotations.isNotEmpty()) {
+            mapView.removeAnnotations(existingAnnotations)
+        }
+        val annotations = places.map { place -> CampusPlaceAnnotation(place) }
+        if (annotations.isNotEmpty()) {
+            mapView.addAnnotations(annotations)
+        }
     }
 
     syncRouteOverlay(
@@ -1325,7 +1273,8 @@ internal class CampusPlaceAnnotation(
 }
 
 internal class CampusMapDelegate(
-    var onPlaceSelected: (Place) -> Unit
+    var onPlaceSelected: (Place) -> Unit,
+    var onMapTap: () -> Unit = {}
 ) : NSObject(), MKMapViewDelegateProtocol {
     private var isApplyingCampusConstraint = false
 
@@ -1342,6 +1291,9 @@ internal class CampusMapDelegate(
         markerView.annotation = viewForAnnotation
         markerView.canShowCallout = true
         markerView.markerTintColor = UIColor.redColor
+        if (viewForAnnotation is CampusPlaceAnnotation) {
+            markerView.glyphText = iosMarkerEmoji(viewForAnnotation.place.category)
+        }
         return markerView
     }
 
@@ -1400,56 +1352,6 @@ private const val campusCenterLongitude = (campusEastLongitude + campusWestLongi
 private val campusLatitudeSpan = campusNorthLatitude - campusSouthLatitude
 private val campusLongitudeSpan = campusEastLongitude - campusWestLongitude
 
-private const val iosCampusMapStyleJson = """
-[
-  { "featureType": "all", "elementType": "labels", "stylers": [{ "visibility": "off" }] },
-  { "featureType": "poi", "stylers": [{ "visibility": "off" }] }
-]
-"""
-
-internal fun iosCampusMapStyle(): GMSMapStyle? =
-    GMSMapStyle.styleWithJSONString(iosCampusMapStyleJson, null)
-
-internal fun iosMarkerView(place: Place): UIView {
-    val labelText = place.name
-    val estimatedTextWidth = (labelText.length * 8.0).coerceIn(28.0, 84.0)
-    val chipWidth = estimatedTextWidth + 24.0
-    val chipLeft = 8.0
-    val pinWidth = 36.0
-    val pinLeft = chipLeft + ((chipWidth - pinWidth) / 2.0)
-    val containerWidth = chipLeft * 2.0 + chipWidth
-
-    val container = UIView(frame = platform.CoreGraphics.CGRectMake(0.0, 0.0, containerWidth, 62.0))
-
-    val chip = UIView(frame = platform.CoreGraphics.CGRectMake(chipLeft, 0.0, chipWidth, 28.0))
-    chip.backgroundColor = UIColor.whiteColor
-    chip.layer.cornerRadius = 12.0
-    chip.layer.borderWidth = 1.0
-    chip.layer.borderColor = UIColor.colorWithWhite(0.0, alpha = 0.08).CGColor
-
-    val label = UILabel(frame = platform.CoreGraphics.CGRectMake(12.0, 4.0, chipWidth - 24.0, 20.0))
-    label.text = labelText
-    label.font = UIFont.boldSystemFontOfSize(12.0)
-    label.textColor = UIColor.blackColor
-    label.textAlignment = UITextAlignmentLeft
-    chip.addSubview(label)
-
-    val pinBubble = UIView(frame = platform.CoreGraphics.CGRectMake(pinLeft, 30.0, 36.0, 28.0))
-    pinBubble.backgroundColor = UIColor.whiteColor
-    pinBubble.layer.cornerRadius = 18.0
-    pinBubble.layer.borderWidth = 1.0
-    pinBubble.layer.borderColor = UIColor.colorWithWhite(0.0, alpha = 0.08).CGColor
-
-    val iconLabel = UILabel(frame = platform.CoreGraphics.CGRectMake(0.0, 2.0, 36.0, 22.0))
-    iconLabel.text = iosMarkerEmoji(place.category)
-    iconLabel.font = UIFont.systemFontOfSize(18.0)
-    iconLabel.textAlignment = UITextAlignmentCenter
-    pinBubble.addSubview(iconLabel)
-
-    container.addSubview(chip)
-    container.addSubview(pinBubble)
-    return container
-}
 
 internal fun iosMarkerEmoji(category: PlaceCategory): String = when (category) {
     PlaceCategory.BLOCK -> "\uD83C\uDFE2"
