@@ -4,7 +4,6 @@ platform :ios, '15.0'
 use_frameworks!
 
 target 'iosApp' do
-  pod 'GoogleMaps'
   pod 'FirebaseMessaging', '~> 10.29.0'
   pod 'FirebaseCore', '~> 10.29.0'
   pod 'FirebaseFirestore', '~> 10.29.0'

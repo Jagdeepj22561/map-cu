@@ -4,16 +4,15 @@ on:
   workflow_dispatch:
     inputs:
       build_configuration:
-        description: 'Build Configuration'
+        description: 'Build Configuration (Debug is 5x faster; Release has full optimization)'
         required: true
-        default: 'Release'
+        default: 'Debug'
         type: choice
         options:
-          - Release
           - Debug
+          - Release
 
 env:
-  # Prevent Gradle OOM on GitHub-hosted macOS runners (overriding local 12GB setting)
   GRADLE_OPTS: "-Dorg.gradle.jvmargs=-Xmx4096m -XX:MaxMetaspaceSize=1024m -Dfile.encoding=UTF-8"
 
 jobs:
@@ -35,8 +34,19 @@ jobs:
       - name: Grant Execute Permission to Gradle Wrapper & Disable Daemon Toolchain
         run: |
           chmod +x gradlew
-          # Ensure Gradle uses the installed Java 17 directly and never attempts to download via foojay
           rm -f gradle/gradle-daemon-jvm.properties
+
+      # Cache Gradle local build cache (~/.gradle/caches/build-cache-1)
+      - name: Cache Gradle Build Cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches/build-cache-1
+            ~/.gradle/caches/transforms-3
+            ~/.gradle/caches/transforms-4
+          key: ${{ runner.os }}-gradle-buildcache-${{ hashFiles('**/*.gradle.kts', 'gradle/libs.versions.toml') }}
+          restore-keys: |
+            ${{ runner.os }}-gradle-buildcache-
 
       # Cache Kotlin/Native Toolchain (~1.5GB download: clang, sysroot, lld, libffi)
       - name: Restore Kotlin/Native Toolchain
@@ -48,7 +58,7 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-konan-
 
-      # Cache CocoaPods dependencies & download cache (GoogleMaps, Firebase)
+      # Cache CocoaPods dependencies & download cache
       - name: Restore CocoaPods
         id: restore-pods
         uses: actions/cache/restore@v4
@@ -60,12 +70,32 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-pods-
 
+      # Cache synthetic CocoaPods build (prevents rebuilding Firebase from C++ source every run)
+      - name: Cache Synthetic Pods Build
+        uses: actions/cache@v4
+        with:
+          path: |
+            shared/build/cocoapods/synthetic/ios/build
+            shared/build/cocoapods/synthetic/ios/Pods
+          key: ${{ runner.os }}-synthetic-pods-${{ hashFiles('iosApp/Podfile') }}
+          restore-keys: |
+            ${{ runner.os }}-synthetic-pods-
+
+      # Cache Xcode DerivedData Intermediates (speeds up xcodebuild)
+      - name: Cache Xcode Intermediate Build Artifacts
+        uses: actions/cache@v4
+        with:
+          path: iosApp/build/Build/Intermediates.noindex
+          key: ${{ runner.os }}-xcode-intermediates-${{ github.event.inputs.build_configuration || 'Debug' }}-${{ hashFiles('iosApp/Podfile') }}
+          restore-keys: |
+            ${{ runner.os }}-xcode-intermediates-${{ github.event.inputs.build_configuration || 'Debug' }}-
+
       # Step 1: Generate initial podspec and dummy framework so pod install recognizes the shared pod
       - name: Generate Shared KMP Pod Artifacts
         run: |
-          ./gradlew :shared:podspec :shared:generateDummyFramework --no-daemon --build-cache
+          ./gradlew :shared:podspec :shared:generateDummyFramework --build-cache
 
-      # Step 2: Install CocoaPods to download GoogleMaps, Firebase and create iosApp.xcworkspace
+      # Step 2: Install CocoaPods to download Firebase and create iosApp.xcworkspace
       - name: Install CocoaPods
         run: |
           cd iosApp
@@ -84,7 +114,7 @@ jobs:
             ~/Library/Caches/CocoaPods
           key: ${{ steps.restore-pods.outputs.cache-primary-key || format('{0}-pods-{1}', runner.os, hashFiles('iosApp/Podfile')) }}
 
-      # Step 3: Build the real shared KMP arm64 framework for physical device (cinterop against downloaded Pods)
+      # Step 3: Build the real shared KMP arm64 framework for physical device
       - name: Build Real Shared KMP Framework for iPhone
         run: |
           export CODE_SIGNING_ALLOWED=NO
@@ -94,8 +124,7 @@ jobs:
           ./gradlew :shared:syncFramework \
             -Pkotlin.native.cocoapods.platform=iphoneos \
             -Pkotlin.native.cocoapods.archs="arm64" \
-            -Pkotlin.native.cocoapods.configuration=${{ github.event.inputs.build_configuration || 'Release' }} \
-            --no-daemon \
+            -Pkotlin.native.cocoapods.configuration=${{ github.event.inputs.build_configuration || 'Debug' }} \
             --build-cache
 
       - name: Save Kotlin/Native Toolchain
@@ -106,8 +135,6 @@ jobs:
           key: ${{ steps.restore-konan.outputs.cache-primary-key || format('{0}-konan-{1}', runner.os, hashFiles('gradle/libs.versions.toml')) }}
 
       # Step 4: Build iOS app for physical device.
-      # OVERRIDE_KOTLIN_BUILD_IDE_SUPPORTED=YES tells CocoaPods script phase in Xcode to skip re-running Gradle,
-      # avoiding environment/PATH/Java subshell failures.
       - name: Build iOS App for Device
         run: |
           cd iosApp
@@ -150,9 +177,12 @@ jobs:
           xcodebuild \
             -workspace iosApp.xcworkspace \
             -scheme iosApp \
-            -configuration ${{ github.event.inputs.build_configuration || 'Release' }} \
+            -configuration ${{ github.event.inputs.build_configuration || 'Debug' }} \
             -sdk iphoneos \
             -derivedDataPath build \
+            -parallelizeTargets \
+            -jobs $(sysctl -n hw.ncpu) \
+            COMPILER_INDEX_STORE_ENABLE=NO \
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGN_IDENTITY="" \
@@ -187,6 +217,6 @@ jobs:
       - name: Upload IPA Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: iosApp-${{ github.event.inputs.build_configuration || 'Release' }}-sideloadly
+          name: iosApp-${{ github.event.inputs.build_configuration || 'Debug' }}-sideloadly
           path: iosApp/iosApp.ipa
           retention-days: 7

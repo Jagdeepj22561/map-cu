@@ -63,7 +63,6 @@ kotlin {
             baseName = xcfName
             isStatic = true
         }
-        pod("GoogleMaps")
         pod("FirebaseCore") {
             version = "~> 10.29.0"
         }
