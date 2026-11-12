@@ -31,6 +31,13 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
         _ application: UIApplication,
         didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey : Any]? = nil
     ) -> Bool {
+        NSSetUncaughtExceptionHandler { exception in
+            let symbols = exception.callStackSymbols.joined(separator: "\n")
+            let text = "=== FATAL CRASH REPORT ===\nException: \(exception.name.rawValue)\nReason: \(exception.reason ?? "Unknown")\n\nCall Stack:\n\(symbols)"
+            UserDefaults.standard.set(text, forKey: "last_crash_log")
+            UserDefaults.standard.synchronize()
+        }
+
         if FirebaseApp.app() == nil {
             FirebaseApp.configure()
         }
@@ -88,6 +95,9 @@ struct iOSApp: App {
         let email = IosPlatformSupportKt.iosCurrentSessionEmail()
         return email
     }()
+    @State private var previousCrashLog: String? = nil
+    @State private var showCrashReportSheet: Bool = false
+    @State private var crashLogCopied: Bool = false
 
     init() {
         if FirebaseApp.app() == nil {
@@ -119,6 +129,7 @@ struct iOSApp: App {
                 case .login:
                     LoginView(
                         onLogin: { email, _ in
+                            print("iOSApp: Transitioning to Home after login for \(email)")
                             currentEmail = email
                             route = .home
                         },
@@ -130,12 +141,78 @@ struct iOSApp: App {
             }
             .onAppear {
                 syncPersistedState()
+                checkPreviousCrashLog()
             }
             .onChange(of: scenePhase) { _, newPhase in
                 if newPhase == .active {
                     syncPersistedState()
+                    checkPreviousCrashLog()
                 }
             }
+            .sheet(isPresented: $showCrashReportSheet) {
+                if let log = previousCrashLog {
+                    NavigationView {
+                        VStack(spacing: 16) {
+                            Text("The application recorded an error or crash. You can copy the diagnostic details below:")
+                                .font(.subheadline)
+                                .foregroundColor(.secondary)
+                                .padding(.horizontal)
+
+                            ScrollView {
+                                Text(log)
+                                    .font(.system(.caption, design: .monospaced))
+                                    .padding()
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                    .background(Color(UIColor.secondarySystemBackground))
+                                    .cornerRadius(10)
+                                    .padding(.horizontal)
+                            }
+
+                            HStack(spacing: 12) {
+                                Button(action: {
+                                    UIPasteboard.general.string = log
+                                    crashLogCopied = true
+                                }) {
+                                    HStack {
+                                        Image(systemName: crashLogCopied ? "checkmark" : "doc.on.doc")
+                                        Text(crashLogCopied ? "Copied to Clipboard!" : "Copy Full Log")
+                                    }
+                                    .frame(maxWidth: .infinity)
+                                    .padding()
+                                    .background(crashLogCopied ? Color.green : Color.blue)
+                                    .foregroundColor(.white)
+                                    .cornerRadius(12)
+                                    .fontWeight(.semibold)
+                                }
+
+                                Button(action: {
+                                    UserDefaults.standard.removeObject(forKey: "last_crash_log")
+                                    previousCrashLog = nil
+                                    showCrashReportSheet = false
+                                }) {
+                                    Text("Dismiss")
+                                        .frame(maxWidth: .infinity)
+                                        .padding()
+                                        .background(Color(UIColor.systemGray5))
+                                        .foregroundColor(.primary)
+                                        .cornerRadius(12)
+                                }
+                            }
+                            .padding(.horizontal)
+                            .padding(.bottom, 12)
+                        }
+                        .navigationTitle("Diagnostic Log")
+                        .navigationBarTitleDisplayMode(.inline)
+                    }
+                }
+            }
+        }
+    }
+
+    private func checkPreviousCrashLog() {
+        if let saved = UserDefaults.standard.string(forKey: "last_crash_log"), !saved.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            previousCrashLog = saved
+            showCrashReportSheet = true
         }
     }
 

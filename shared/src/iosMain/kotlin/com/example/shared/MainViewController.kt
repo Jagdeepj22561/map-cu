@@ -87,19 +87,48 @@ internal fun LoginRoute(
                     loading = true
                     status = ""
                     scope.launch {
-                        runCatching {
+                        try {
+                            IosInAppDebugLogStore.log("Attempting login for: $normalizedEmail")
                             val session = IosAuthApi.login(normalizedEmail, password)
-                            IosChatRepository().resetSessionState()
-                            val user = runCatching {
-                                IosUserStore.refreshCurrentUser()
-                                    ?: IosUserStore.getUser(session.uid)
-                            }.getOrNull()
-                            IosPreferencesStore.setGhostMode(user?.ghostMode ?: false)
+                            IosInAppDebugLogStore.log("Login successful, session uid: ${session.uid}")
+
+                            // Reset chat repository state for the new user safely
+                            try {
+                                IosInAppDebugLogStore.log("Resetting chat session...")
+                                IosChatRepository().resetSessionState()
+                            } catch (chatError: Throwable) {
+                                IosInAppDebugLogStore.log("Warning resetting chat: ${chatError.message}")
+                            }
+
+                            // Refresh user profile safely
+                            try {
+                                IosInAppDebugLogStore.log("Refreshing user profile...")
+                                val user = IosUserStore.refreshCurrentUser() ?: IosUserStore.getUser(session.uid)
+                                if (user != null) {
+                                    IosPreferencesStore.setGhostMode(user.ghostMode)
+                                }
+                            } catch (userError: Throwable) {
+                                IosInAppDebugLogStore.log("Warning refreshing user: ${userError.message}")
+                            }
+
                             loading = false
-                            onLogin(normalizedEmail, session.uid)
-                        }.onFailure { error ->
+
+                            // Transition route to home with try-catch
+                            try {
+                                IosInAppDebugLogStore.log("Invoking onLogin callback for $normalizedEmail...")
+                                onLogin(normalizedEmail, session.uid)
+                            } catch (navError: Throwable) {
+                                IosInAppDebugLogStore.log("Error in onLogin callback: ${navError.message}")
+                                IosGlobalErrorState.reportError(
+                                    title = "Navigation failed after login",
+                                    details = navError.stackTraceToString()
+                                )
+                            }
+                        } catch (error: Throwable) {
                             loading = false
-                            status = error.message ?: "Login failed"
+                            val errorMsg = error.message ?: "Login failed"
+                            IosInAppDebugLogStore.log("Login failed: $errorMsg")
+                            status = errorMsg
                         }
                     }
                 }

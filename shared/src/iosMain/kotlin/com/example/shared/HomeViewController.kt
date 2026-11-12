@@ -221,35 +221,70 @@ internal fun HomeRoute(
     }
 
     LaunchedEffect(Unit) {
-        runCatching { IosAuthApi.restoreSharedSession() }
-        runCatching { chatRepository.startSync() }
-        runCatching { IosUserStore.refreshCurrentUser() }
-        currentLocation = currentUser?.location ?: defaultLocation
+        try {
+            IosInAppDebugLogStore.log("HomeScreen entered for $initialEmail")
+            try {
+                IosInAppDebugLogStore.log("Restoring auth session...")
+                IosAuthApi.restoreSharedSession()
+            } catch (e: Throwable) {
+                IosInAppDebugLogStore.log("Session restore warning: ${e.message}")
+            }
+            try {
+                IosInAppDebugLogStore.log("Starting chat sync...")
+                chatRepository.startSync()
+            } catch (e: Throwable) {
+                IosInAppDebugLogStore.log("Chat sync warning: ${e.message}")
+            }
+            try {
+                IosInAppDebugLogStore.log("Refreshing current user profile...")
+                IosUserStore.refreshCurrentUser()
+            } catch (e: Throwable) {
+                IosInAppDebugLogStore.log("User refresh warning: ${e.message}")
+            }
+            currentLocation = currentUser?.location ?: defaultLocation
+        } catch (t: Throwable) {
+            IosInAppDebugLogStore.log("Home initialization error: ${t.message}")
+        }
     }
 
     DisposableEffect(currentScreen == PureAppScreen.MAP) {
-        if (currentScreen == PureAppScreen.MAP) {
-            runCatching { IosLocationService.start() }
-        } else {
-            runCatching { IosLocationService.stop() }
+        try {
+            if (currentScreen == PureAppScreen.MAP) {
+                IosInAppDebugLogStore.log("Starting location service...")
+                IosLocationService.start()
+            } else {
+                IosLocationService.stop()
+            }
+        } catch (t: Throwable) {
+            IosInAppDebugLogStore.log("Location service toggle error: ${t.message}")
         }
         onDispose {
-            runCatching { IosLocationService.stop() }
+            try {
+                IosLocationService.stop()
+            } catch (t: Throwable) {
+                IosInAppDebugLogStore.log("Location service dispose error: ${t.message}")
+            }
         }
     }
 
     LaunchedEffect(currentUser?.uid) {
-        currentUser?.location?.let { currentLocation = it }
-        if (currentUser != null) {
-            isGhostMode = currentUser!!.ghostMode
+        try {
+            currentUser?.location?.let { currentLocation = it }
+            if (currentUser != null) {
+                isGhostMode = currentUser!!.ghostMode
+            }
+        } catch (t: Throwable) {
+            IosInAppDebugLogStore.log("User UID update error: ${t.message}")
         }
     }
 
     LaunchedEffect(liveLocation?.lat, liveLocation?.lng) {
-        val point = liveLocation ?: return@LaunchedEffect
-        currentLocation = point
-        runCatching {
+        try {
+            val point = liveLocation ?: return@LaunchedEffect
+            currentLocation = point
             IosUserStore.updateLocation(point.lat, point.lng)
+        } catch (t: Throwable) {
+            IosInAppDebugLogStore.log("Location update error: ${t.message}")
         }
     }
 
