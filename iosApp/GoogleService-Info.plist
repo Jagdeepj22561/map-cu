@@ -3,7 +3,7 @@
 <plist version="1.0">
 <dict>
 	<key>API_KEY</key>
-	<string>AIzaSyDummyKeyForBuildWithoutFirebaseConfig</string>
+	<string>AIzaSyB3B7v0OQEYfFsKIiytcvVT8SniI_xYz6g</string>
 	<key>GCM_SENDER_ID</key>
 	<string>123456789012</string>
 	<key>PLIST_VERSION</key>
@@ -11,9 +11,9 @@
 	<key>BUNDLE_ID</key>
 	<string>com.example.iosApp</string>
 	<key>PROJECT_ID</key>
-	<string>maps123-cu</string>
+	<string>cu-updates</string>
 	<key>STORAGE_BUCKET</key>
-	<string>maps123-cu.appspot.com</string>
+	<string>cu-updates.appspot.com</string>
 	<key>IS_ADS_ENABLED</key>
 	<false/>
 	<key>IS_ANALYTICS_ENABLED</key>
