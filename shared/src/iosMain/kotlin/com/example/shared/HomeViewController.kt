@@ -1108,6 +1108,7 @@ internal fun IosMapKitView(
                     onPlaceSelected = { latestOnPlaceSelected(it) },
                     onMapTap = { latestOnMapTap() }
                 )
+                delegate.placeLookup = latestPlaces.associateBy { it.name }
                 mapView.delegate = delegate
                 mapView.showsUserLocation = true
                 val initialCenter = CLLocationCoordinate2DMake(campusCenterLatitude, campusCenterLongitude)
@@ -1123,6 +1124,7 @@ internal fun IosMapKitView(
             val mapView = view as? MKMapView ?: return@UIKitView
             runCatching {
                 val delegate = mapView.delegate as? CampusMapDelegate
+                delegate?.placeLookup = latestPlaces.associateBy { it.name }
                 delegate?.onPlaceSelected = { latestOnPlaceSelected(it) }
                 delegate?.onMapTap = { latestOnMapTap() }
                 syncMapAnnotations(
@@ -1152,16 +1154,24 @@ internal fun syncMapAnnotations(
     activeRoute: Route?,
     isNavigating: Boolean
 ) {
-    val existingAnnotations = mapView.annotations
+    val rawAnnotations = mapView.annotations ?: emptyList<Any?>()
+    val existingAnnotations = rawAnnotations
         .filterIsInstance<MKAnnotationProtocol>()
         .filterNot { it is MKUserLocation }
+
     val currentTitles = existingAnnotations.mapNotNull { it.title }.toSet()
     val newTitles = places.map { it.name }.toSet()
     if (currentTitles != newTitles) {
         if (existingAnnotations.isNotEmpty()) {
             mapView.removeAnnotations(existingAnnotations)
         }
-        val annotations = places.map { place -> CampusPlaceAnnotation(place) }
+        val annotations = places.map { place ->
+            val annotation = MKPointAnnotation()
+            annotation.setTitle(place.name)
+            annotation.setSubtitle(place.category.name.lowercase())
+            annotation.setCoordinate(CLLocationCoordinate2DMake(place.latitude, place.longitude))
+            annotation
+        }
         if (annotations.isNotEmpty()) {
             mapView.addAnnotations(annotations)
         }
@@ -1206,7 +1216,8 @@ internal fun syncRouteOverlay(
     activeRoute: Route?,
     isNavigating: Boolean
 ) {
-    val existingOverlays = mapView.overlays.filterIsInstance<MKOverlayProtocol>()
+    val rawOverlays = mapView.overlays ?: emptyList<Any?>()
+    val existingOverlays = rawOverlays.filterIsInstance<MKOverlayProtocol>()
     if (existingOverlays.isNotEmpty()) {
         mapView.removeOverlays(existingOverlays)
     }
@@ -1262,21 +1273,12 @@ internal fun routeBoundingRegion(points: List<GeoPoint>) = if (points.isEmpty())
     )
 }
 
-internal class CampusPlaceAnnotation(
-    val place: Place
-) : MKPointAnnotation() {
-    init {
-        setTitle(place.name)
-        setSubtitle(place.category.name.lowercase())
-        setCoordinate(CLLocationCoordinate2DMake(place.latitude, place.longitude))
-    }
-}
-
 internal class CampusMapDelegate(
     var onPlaceSelected: (Place) -> Unit,
     var onMapTap: () -> Unit = {}
 ) : NSObject(), MKMapViewDelegateProtocol {
     private var isApplyingCampusConstraint = false
+    var placeLookup: Map<String, Place> = emptyMap()
 
     override fun mapView(
         mapView: MKMapView,
@@ -1291,8 +1293,10 @@ internal class CampusMapDelegate(
         markerView.annotation = viewForAnnotation
         markerView.canShowCallout = true
         markerView.markerTintColor = UIColor.redColor
-        if (viewForAnnotation is CampusPlaceAnnotation) {
-            markerView.glyphText = iosMarkerEmoji(viewForAnnotation.place.category)
+        val title = viewForAnnotation.title
+        val place = if (title != null) placeLookup[title] else null
+        if (place != null) {
+            markerView.glyphText = iosMarkerEmoji(place.category)
         }
         return markerView
     }
@@ -1312,8 +1316,9 @@ internal class CampusMapDelegate(
         mapView: MKMapView,
         didSelectAnnotationView: MKAnnotationView
     ) {
-        val annotation = didSelectAnnotationView.annotation as? CampusPlaceAnnotation ?: return
-        onPlaceSelected(annotation.place)
+        val title = didSelectAnnotationView.annotation?.title ?: return
+        val place = placeLookup[title] ?: return
+        onPlaceSelected(place)
     }
 
     override fun mapView(
