@@ -135,12 +135,15 @@ fun HomeViewController(
     initialEmail: String = "",
     onOpenSettings: () -> Unit = {},
     onLogout: () -> Unit = {}
-): UIViewController = SafeComposeViewController(screenName = "Home") {
-    HomeRoute(
-        initialEmail = initialEmail,
-        onOpenSettings = onOpenSettings,
-        onLogout = onLogout
-    )
+): UIViewController {
+    IosInAppDebugLogStore.log("HomeViewController requested initialEmailPresent=${initialEmail.isNotBlank()}")
+    return SafeComposeViewController(screenName = "Home") {
+        HomeRoute(
+            initialEmail = initialEmail,
+            onOpenSettings = onOpenSettings,
+            onLogout = onLogout
+        )
+    }
 }
 
 @Composable
@@ -149,9 +152,16 @@ internal fun HomeRoute(
     onOpenSettings: () -> Unit,
     onLogout: () -> Unit
 ) {
+    IosInAppDebugLogStore.log("HomeRoute composition started")
     val scope = rememberCoroutineScope()
-    val chatRepository = remember { IosChatRepository() }
-    val announcementRepository = remember { AnnouncementRepository() }
+    val chatRepository = remember {
+        IosInAppDebugLogStore.log("HomeRoute creating chat repository")
+        IosChatRepository()
+    }
+    val announcementRepository = remember {
+        IosInAppDebugLogStore.log("HomeRoute creating announcement repository")
+        AnnouncementRepository()
+    }
 
     val currentUser by IosUserStore.currentUser.collectAsState(initial = null)
     val chats by chatRepository.allChats.collectAsState(initial = emptyList())
@@ -202,8 +212,14 @@ internal fun HomeRoute(
     var errorMessage by remember { mutableStateOf<String?>(null) }
     var showDebugLog by remember { mutableStateOf(false) }
     var recenterTrigger by remember { mutableIntStateOf(0) }
-    val localPlaces = remember { IosLocalDatabaseStore.loadPlaces() }
-    val localRoutes = remember { IosLocalDatabaseStore.loadRoutes() }
+    val localPlaces = remember {
+        IosInAppDebugLogStore.log("HomeRoute loading cached places")
+        IosLocalDatabaseStore.loadPlaces()
+    }
+    val localRoutes = remember {
+        IosInAppDebugLogStore.log("HomeRoute loading cached routes")
+        IosLocalDatabaseStore.loadRoutes()
+    }
     val baseMapPlaces = if (localPlaces.isNotEmpty()) localPlaces else campusPlaces
     val filteredMapPlaces = remember(baseMapPlaces, searchQuery, selectedCategory, mapZoom) {
         var places = baseMapPlaces
@@ -222,28 +238,29 @@ internal fun HomeRoute(
 
     LaunchedEffect(Unit) {
         try {
+            IosInAppDebugLogStore.log("HomeRoute initial composition completed; starting home effects")
             IosInAppDebugLogStore.log("HomeScreen entered for $initialEmail")
             try {
                 IosInAppDebugLogStore.log("Restoring auth session...")
                 IosAuthApi.restoreSharedSession()
             } catch (e: Throwable) {
-                IosInAppDebugLogStore.log("Session restore warning: ${e.message}")
+                IosInAppDebugLogStore.logError("Session restore warning", e)
             }
             try {
                 IosInAppDebugLogStore.log("Starting chat sync...")
                 chatRepository.startSync()
             } catch (e: Throwable) {
-                IosInAppDebugLogStore.log("Chat sync warning: ${e.message}")
+                IosInAppDebugLogStore.logError("Chat sync warning", e)
             }
             try {
                 IosInAppDebugLogStore.log("Refreshing current user profile...")
                 IosUserStore.refreshCurrentUser()
             } catch (e: Throwable) {
-                IosInAppDebugLogStore.log("User refresh warning: ${e.message}")
+                IosInAppDebugLogStore.logError("User refresh warning", e)
             }
             currentLocation = currentUser?.location ?: defaultLocation
         } catch (t: Throwable) {
-            IosInAppDebugLogStore.log("Home initialization error: ${t.message}")
+            IosInAppDebugLogStore.logError("Home initialization error", t)
         }
     }
 
@@ -256,13 +273,13 @@ internal fun HomeRoute(
                 IosLocationService.stop()
             }
         } catch (t: Throwable) {
-            IosInAppDebugLogStore.log("Location service toggle error: ${t.message}")
+            IosInAppDebugLogStore.logError("Location service toggle error", t)
         }
         onDispose {
             try {
                 IosLocationService.stop()
             } catch (t: Throwable) {
-                IosInAppDebugLogStore.log("Location service dispose error: ${t.message}")
+                IosInAppDebugLogStore.logError("Location service dispose error", t)
             }
         }
     }
@@ -274,7 +291,7 @@ internal fun HomeRoute(
                 isGhostMode = currentUser!!.ghostMode
             }
         } catch (t: Throwable) {
-            IosInAppDebugLogStore.log("User UID update error: ${t.message}")
+            IosInAppDebugLogStore.logError("User UID update error", t)
         }
     }
 
@@ -284,7 +301,7 @@ internal fun HomeRoute(
             currentLocation = point
             IosUserStore.updateLocation(point.lat, point.lng)
         } catch (t: Throwable) {
-            IosInAppDebugLogStore.log("Location update error: ${t.message}")
+            IosInAppDebugLogStore.logError("Location update error", t)
         }
     }
 

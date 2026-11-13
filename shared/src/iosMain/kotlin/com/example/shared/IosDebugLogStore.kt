@@ -5,6 +5,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import platform.Foundation.NSDate
 import platform.Foundation.NSDateFormatter
+import platform.Foundation.NSLog
 import platform.Foundation.NSUserDefaults
 import platform.UIKit.UIPasteboard
 import kotlin.native.setUnhandledExceptionHook
@@ -18,13 +19,34 @@ data class AppCrashInfo(
 
 object IosInAppDebugLogStore {
     private const val maxEntries = 300
-    private val _entries = MutableStateFlow<List<String>>(emptyList())
+    private val _entries = MutableStateFlow(
+        runCatching {
+            NSUserDefaults.standardUserDefaults
+                .stringForKey("live_debug_log")
+                ?.lines()
+                ?.filter { it.isNotBlank() }
+                ?.takeLast(maxEntries)
+                .orEmpty()
+        }.getOrDefault(emptyList())
+    )
     val entries: StateFlow<List<String>> = _entries.asStateFlow()
 
     fun log(message: String) {
         val timestamped = "${iosDebugTimestamp()}  $message"
         println("[APP_LOG] $timestamped")
-        _entries.value = (_entries.value + timestamped).takeLast(maxEntries)
+        NSLog("[APP_LOG] $timestamped")
+        val updated = (_entries.value + timestamped).takeLast(maxEntries)
+        _entries.value = updated
+        runCatching {
+            NSUserDefaults.standardUserDefaults.setObject(
+                updated.joinToString("\n"),
+                forKey = "live_debug_log"
+            )
+        }
+    }
+
+    fun logError(message: String, throwable: Throwable) {
+        log("$message: ${throwable.stackTraceToString()}")
     }
 
     fun getAllLogs(): List<String> = _entries.value
@@ -33,8 +55,13 @@ object IosInAppDebugLogStore {
 
     fun clear() {
         _entries.value = emptyList()
+        runCatching { NSUserDefaults.standardUserDefaults.removeObjectForKey("live_debug_log") }
     }
 }
+
+fun iosGetLiveDebugLog(): String? = runCatching {
+    NSUserDefaults.standardUserDefaults.stringForKey("live_debug_log")
+}.getOrNull()
 
 object IosGlobalErrorState {
     private val _currentError = MutableStateFlow<AppCrashInfo?>(null)

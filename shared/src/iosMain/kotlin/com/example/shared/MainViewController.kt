@@ -127,7 +127,7 @@ internal fun LoginRoute(
                         } catch (error: Throwable) {
                             loading = false
                             val errorMsg = error.message ?: "Login failed"
-                            IosInAppDebugLogStore.log("Login failed: $errorMsg")
+                            IosInAppDebugLogStore.logError("Login failed: $errorMsg", error)
                             status = errorMsg
                         }
                     }

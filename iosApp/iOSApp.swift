@@ -33,7 +33,8 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
     ) -> Bool {
         NSSetUncaughtExceptionHandler { exception in
             let symbols = exception.callStackSymbols.joined(separator: "\n")
-            let text = "=== FATAL CRASH REPORT ===\nException: \(exception.name.rawValue)\nReason: \(exception.reason ?? "Unknown")\n\nCall Stack:\n\(symbols)"
+            let liveLog = UserDefaults.standard.string(forKey: "live_debug_log") ?? "(no live app log)"
+            let text = "=== FATAL CRASH REPORT ===\nException: \(exception.name.rawValue)\nReason: \(exception.reason ?? "Unknown")\n\nCall Stack:\n\(symbols)\n\nRecent App Log:\n\(liveLog)"
             UserDefaults.standard.set(text, forKey: "last_crash_log")
             UserDefaults.standard.synchronize()
         }
@@ -110,6 +111,7 @@ struct iOSApp: App {
             Group {
                 switch route {
                 case .home:
+                    print("[APP_LOG] iOSApp rendering Home route")
                     HomeView(
                         initialEmail: currentEmail,
                         onLogout: {
@@ -129,9 +131,10 @@ struct iOSApp: App {
                 case .login:
                     LoginView(
                         onLogin: { email, _ in
-                            print("iOSApp: Transitioning to Home after login for \(email)")
+                            print("[APP_LOG] iOSApp login callback; transitioning to Home emailPresent=\(!email.isEmpty)")
                             currentEmail = email
                             route = .home
+                            print("[APP_LOG] iOSApp Home route state assigned")
                         },
                         onRegister: {
                             route = .register
